@@ -1,0 +1,11 @@
+# Ignore config and local data
+settings.ini
+game_data/
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+
+# Logs and databases
+*.log
+*.db
