@@ -647,7 +647,8 @@ def _perform_torch_attempt(player_data):
     torch_repay = global_vars.config.getboolean('Torch', 'Repay', fallback=False)
     blacklist_raw = global_vars.config.get('Torch', 'Blacklist', fallback='').lower()
     blacklist_items = {item.strip() for item in blacklist_raw.split(',') if item.strip()}
-    blacklist_items.add("drug house") # Always blacklist drug house for Torch
+    blacklist_items.add("drug house") # Always blacklist drug house
+    blacklist_items.add("fire station")  # Always blacklist fire station
 
     dropdown_xpath = "/html/body/div[4]/div[4]/div[2]/div[2]/form/p[2]/select"
     try:
