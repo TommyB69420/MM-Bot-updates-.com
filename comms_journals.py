@@ -4,9 +4,9 @@ import re
 import requests
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
-from helper_functions import _find_element, _find_elements, _find_and_click, _get_element_text, \
-    _navigate_to_page_via_menu, _select_dropdown_option
+from helper_functions import _find_element, _find_elements, _find_and_click, _get_element_text, _navigate_to_page_via_menu, _select_dropdown_option
 import global_vars
+
 
 def send_discord_notification(message):
     """Sends a message to the configured Discord webhook, reading URL from settings.ini."""
@@ -447,6 +447,11 @@ def check_into_hospital_for_surgery():
     Navigates to the hospital and applies for surgery if possible.
     """
     print("Trigger: Attempting to check into hospital for surgery...")
+
+    from misc_functions import withdraw_money # import here to prevent a circular problem
+    if not withdraw_money(30000):
+        print("FAILED: Could not withdraw money for surgery.")
+        return False
 
     if not _navigate_to_page_via_menu(
             "//span[@class='city']",
