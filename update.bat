@@ -2,7 +2,7 @@
 setlocal
 
 :: ====== Configuration ======
-set "REPO_URL=https://github.com/TommyB69420/MM-Bot-.com.git"
+set "REPO_URL=https://github.com/TommyB69420/MM-Bot-updates-.com"
 
 echo.
 echo ==========================================
@@ -51,7 +51,7 @@ git fetch origin
 echo Updating repository while preserving settings.ini and game_data...
 git checkout origin/main -- . 2>nul
 
-:: Explicitly remove settings.ini and game_data from staging to avoid overwriting
+::Explicitly remove settings.ini and game_data from staging to avoid overwriting
 git restore --staged settings.ini 2>nul
 git restore --staged game_data/* 2>nul
 
