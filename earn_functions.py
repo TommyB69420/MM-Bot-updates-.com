@@ -72,7 +72,10 @@ def execute_earns_logic():
         "Gangster": ['Scamming', 'Hack bank account', 'Compete at illegal drags', 'Steal cheques', 'Shoplift'],
         "Engineering": ['Chief Engineer at local Construction Company', 'Engineer at local Construction Site', 'Technician at local vehicle yard', 'Mechanic at local vehicle yard'],
         "Medical": ['Hospital Director', 'Surgeon at local hospital', 'Doctor at local hospital', 'Nurse at local hospital'],
-        "Bank": ['Bank Manager', 'Review loan requests', 'Work at local bank']
+        "Bank": ['Bank Manager', 'Review loan requests', 'Work at local bank'],
+        "Funeral": ['Funeral Director', 'Undertaker', 'Mortician',  'Mortician Assistant'],
+        "Police": ['Assign Duties', 'Arrest Criminals', 'Do paper work', 'Patrol'],
+        "Mayor": ['Mayoral Duties'],
     }
 
     final_earn_to_click = which_earn

@@ -73,7 +73,7 @@ def execute_yellow_pages_scan():
 
     occupations = [
         "UNEMPLOYED", "MAYOR", "BANK", "HOSPITAL", "ENGINEERING",
-        "FUNERAL", "FIRE", "LAW", "CUSTOMS", "ARMY", "POLICE", "GANGSTER"
+        "FUNERAL", "FIRE", "LAW", "CUSTOMS", "POLICE", "GANGSTER"
     ]
 
     search_input_xpath = "//*[@id='content']/center/div/div[2]/form/p[2]/input"

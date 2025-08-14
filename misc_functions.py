@@ -1,6 +1,7 @@
 import datetime
 import random
 import time
+import re
 
 from selenium.common import NoSuchElementException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
@@ -841,6 +842,79 @@ def gym_training():
     _set_last_timestamp(global_vars.GYM_TRAINING_FILE, cooldown)
     print(f"Next gym training available at {cooldown.strftime('%Y-%m-%d %H:%M:%S')}")
     return True
+
+def police_training():
+    """
+    Handles police training sign-up and progression.
+    Dynamically stops after completing the required number of training sessions (e.g. 15, 25, etc.).
+    """
+    print("\n--- Starting Police Training Operation ---")
+
+    # Navigate to Police Recruitment page
+    if not _navigate_to_page_via_menu(
+        "//span[@class='city']",
+        "//a[@class='business police']",
+        "Police Recruitment"
+    ):
+        return False
+
+    dropdown_xpath = "//select[@name='action']"
+    submit_button_xpath = "//input[@name='B1']"
+    success_box_xpath = "//div[@id='success']"
+
+    # Check available options in dropdown
+    options = _get_dropdown_options(By.XPATH, dropdown_xpath)
+    if not options:
+        print("FAILED: Could not retrieve dropdown options.")
+        return False
+
+    # Determine if beginning training, or subsequent training
+    if any("acceptpolice" in opt.lower() for opt in options):
+        option_to_select = "acceptpolice"
+        print("Step: Signing up for Police Training...")
+    elif any("yes" in opt.lower() for opt in options):
+        option_to_select = "Yes"
+        print("Step: Continuing Police Training...")
+    else:
+        print("FAILED: No relevant training option found.")
+        return False
+
+    # Select the right drop down option
+    if not _select_dropdown_option(By.XPATH, dropdown_xpath, option_to_select, use_value=True):
+        print("FAILED: Could not select training option.")
+        return False
+
+    #  Click Submit
+    if not _find_and_click(By.XPATH, submit_button_xpath):
+        print("FAILED: Could not click Submit.")
+        return False
+
+    # Check training progress to determine how many trains left to do
+    if option_to_select == "Yes":
+        success_text = _get_element_text(By.XPATH, success_box_xpath)
+        if success_text:
+            print(f"Success Message: '{success_text}'")
+            match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
+            if match:
+                current = int(match.group(1))
+                total = int(match.group(2))
+                print(f"Training Progress: {current}/{total}")
+                if current >= total:
+                    print("Training complete. No further action required.")
+                    return False
+            else:
+                print("WARNING: Could not parse training progress.")
+        else:
+            print("WARNING: Success message not found after submitting.")
+            # Final fallback: Check for completion paragraph
+            final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]")
+            if final_text and "your hard work in training has paid off" in final_text.lower():
+                print("FINAL SUCCESS: Training is now fully complete.")
+                return False
+
+    print("Police training step completed successfully.")
+    return True
+
 
 
 

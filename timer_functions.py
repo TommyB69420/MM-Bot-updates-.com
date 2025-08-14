@@ -62,6 +62,7 @@ def get_all_active_game_timers():
         'event_time_remaining': 0,
 
         'bank_add_clients_time_remaining': 0,
+        'post_911_time_remaining': 0,
 
         'yellow_pages_scan_time_remaining': 0,
         'funeral_parlour_scan_time_remaining': 0,
@@ -137,6 +138,14 @@ def get_all_active_game_timers():
     else:
         timers['check_bionics_store_time_remaining'] = 0.0 # If never checked, check immediately
 
+    # Post 911 timer
+    next_911_post = _get_last_timestamp(global_vars.POLICE_911_NEXT_POST_FILE)
+    if next_911_post:
+        persisted_911_remaining = (next_911_post - current_time).total_seconds()
+        timers['post_911_time_remaining'] = max(timers.get('post_911_time_remaining', 0), max(0, persisted_911_remaining))
+    else:
+        timers['post_911_time_remaining'] = max(timers.get('post_911_time_remaining', 0), 0.0) # If never checked, check immediately
+
     # Aggravated Crime Cooldowns (Base + Rechecks)
     mins_between_aggs = global_vars.config.getint('Misc', 'MinsBetweenAggs', fallback=30)
     last_agg_crime_time_str = _read_text_file(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE)
@@ -181,6 +190,11 @@ def get_all_active_game_timers():
     if script_bank_add_clients_remaining > 0:
         timers['bank_add_clients_time_remaining'] = max(timers.get('bank_add_clients_time_remaining', 0), script_bank_add_clients_remaining)
 
+    # Post 911 Cooldown
+    script_post_911_remaining = (global_vars._script_post_911_cooldown_end_time - current_time).total_seconds()
+    if script_post_911_remaining > 0:
+        timers['post_911_time_remaining'] = max(timers.get('post_911_time_remaining', 0), script_post_911_remaining)
+
     # Judge Cooldown
     script_judge_remaining = (global_vars._script_case_cooldown_end_time - current_time).total_seconds()
     if script_judge_remaining > 0:
@@ -200,6 +214,21 @@ def get_all_active_game_timers():
     script_engineering_remaining = (global_vars._script_case_cooldown_end_time - current_time).total_seconds()
     if script_engineering_remaining > 0:
         timers['case_time_remaining'] = max(timers.get('case_time_remaining', 0), script_engineering_remaining)
+
+    # Police Case Cooldown
+    script_police_case_remaining = (global_vars._script_case_cooldown_end_time - current_time).total_seconds()
+    if script_police_case_remaining > 0:
+        timers['case_time_remaining'] = max(timers.get('case_time_remaining', 0), script_police_case_remaining)
+
+    # Train Forensics cooldown
+    script_train_forensics_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()
+    if script_train_forensics_remaining > 0:
+        timers['action_time_remaining'] = max(timers.get('action_time_remaining', 0), script_train_forensics_remaining)
+
+    # Do Forensics
+    script_forensics_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()
+    if script_forensics_remaining > 0:
+        timers['action_time_remaining'] = max(timers.get('action_time_remaining', 0), script_forensics_remaining)
 
     # Earn Cooldown
     script_earn_remaining = (global_vars._script_earn_cooldown_end_time - current_time).total_seconds()
@@ -230,6 +259,11 @@ def get_all_active_game_timers():
     script_university_degree_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()
     if script_university_degree_remaining > 0:
         timers['action_time_remaining'] = max(timers.get('action_time_remaining', 0), script_university_degree_remaining)
+
+    # Training Cooldown
+    script_training_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()
+    if script_training_remaining > 0:
+        timers['action_time_remaining'] = max(timers.get('action_time_remaining', 0), script_training_remaining)
 
     # Event Cooldown
     script_event_remaining = (global_vars._script_event_cooldown_end_time - current_time).total_seconds()

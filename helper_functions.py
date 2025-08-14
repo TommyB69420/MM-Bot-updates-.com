@@ -151,7 +151,7 @@ def _get_dropdown_options(by_type, value, timeout=EXPLICIT_WAIT_SECONDS):
         print(f"An error occurred while getting dropdown options for {by_type}: {value} - {e}")
         return []
 
-def _select_dropdown_option(by_type, value, option_text, timeout=EXPLICIT_WAIT_SECONDS):
+def _select_dropdown_option(by_type, value, option_text, timeout=EXPLICIT_WAIT_SECONDS, *, use_value=False):
     """
     Selects an option from a dropdown by its visible text.
     Returns True on success, False otherwise.
@@ -163,7 +163,11 @@ def _select_dropdown_option(by_type, value, option_text, timeout=EXPLICIT_WAIT_S
             return False
 
         select = Select(dropdown_element)
-        select.select_by_visible_text(option_text)
+        if use_value:
+            select.select_by_value(option_text)
+        else:
+            select.select_by_visible_text(option_text)
+
         time.sleep(ACTION_PAUSE_SECONDS) # Pause after selection
         print(f"Selected '{option_text}'")
         return True

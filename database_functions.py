@@ -2,7 +2,8 @@ import os
 import json
 import datetime
 from global_vars import COOLDOWN_DATA_DIR, COOLDOWN_FILE, AGGRAVATED_CRIMES_LOG_FILE, FUNERAL_PARLOUR_LAST_SCAN_FILE, \
-    YELLOW_PAGES_LAST_SCAN_FILE, PLAYER_HOME_CITY_KEY, ALL_DEGREES_FILE, WEAPON_SHOP_NEXT_CHECK_FILE
+    YELLOW_PAGES_LAST_SCAN_FILE, PLAYER_HOME_CITY_KEY, ALL_DEGREES_FILE, WEAPON_SHOP_NEXT_CHECK_FILE, \
+    POLICE_911_NEXT_POST_FILE, POLICE_911_CACHE_FILE, PENDING_FORENSICS_FILE, FORENSICS_TRAINING_DONE_FILE
 
 
 def init_local_db():
@@ -16,7 +17,11 @@ def init_local_db():
             FUNERAL_PARLOUR_LAST_SCAN_FILE: lambda f: f.write(""),
             YELLOW_PAGES_LAST_SCAN_FILE: lambda f: f.write(""),
             ALL_DEGREES_FILE: lambda f: json.dump(False, f),
-            WEAPON_SHOP_NEXT_CHECK_FILE: lambda f: f.write("")  # Initialize the new file
+            WEAPON_SHOP_NEXT_CHECK_FILE: lambda f: f.write(""),
+            POLICE_911_NEXT_POST_FILE: lambda f: f.write(""),
+            POLICE_911_CACHE_FILE: lambda f: json.dump([], f),
+            PENDING_FORENSICS_FILE: lambda f: json.dump([], f),
+            FORENSICS_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
         }
 
         for file_path, init_func in files_to_initialize.items():

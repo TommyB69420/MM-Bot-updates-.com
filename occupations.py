@@ -8,8 +8,7 @@ from selenium.webdriver.support.select import Select
 
 import global_vars
 from database_functions import _read_json_file, remove_player_cooldown, set_player_data
-from helper_functions import _find_and_send_keys, _find_and_click, _find_element, _navigate_to_page_via_menu, \
-    _get_element_text, _get_element_attribute, _find_elements
+from helper_functions import _find_and_send_keys, _find_and_click, _find_element, _navigate_to_page_via_menu, _get_element_text, _get_element_attribute, _find_elements
 from timer_functions import get_game_timer_remaining, get_all_active_game_timers
 
 
@@ -37,11 +36,23 @@ def execute_community_services_logic(player_data):
             "reading", "suspect", "football", "delivery", "pamphlets",
             "kids", "weeding", "tags", "gum"
         ]
-        for service_id in community_service_options:
-            if _find_and_click(By.ID, service_id):
-                print(f"Clicked community service: {service_id}")
+        try:
+            # Get all matching visible elements in one go
+            service_elements = global_vars.driver.find_elements(By.XPATH, "//input[@type='radio' and @id]")
+
+            # Filter by only the known IDs in order
+            filtered_services = [elem for elem in service_elements if elem.get_attribute("id") in community_service_options and elem.is_displayed()]
+
+            if filtered_services:
+                # Click the last one available (bottom-most)
+                filtered_services[-1].click()
+                selected_id = filtered_services[-1].get_attribute("id")
+                print(f"Clicked community service: {selected_id}")
                 service_clicked = True
-                break
+            else:
+                print("No regular community service option could be selected.")
+        except Exception as e:
+            print(f"ERROR while trying to find community services: {e}")
         if not service_clicked:
             print("No regular community service option could be selected.")
     else:
