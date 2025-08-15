@@ -9,7 +9,8 @@ import global_vars
 from comms_journals import send_discord_notification
 from helper_functions import _find_and_click, _find_element, _navigate_to_page_via_menu, _get_element_text, \
     _get_dropdown_options, _select_dropdown_option, _find_and_send_keys, _get_current_url
-from database_functions import set_all_degrees_status, get_all_degrees_status, _set_last_timestamp
+from database_functions import set_all_degrees_status, get_all_degrees_status, _set_last_timestamp, _read_json_file, \
+    _write_json_file
 from timer_functions import get_all_active_game_timers
 
 
@@ -848,6 +849,15 @@ def police_training():
     Handles police training sign-up and progression.
     Dynamically stops after completing the required number of training sessions (e.g. 15, 25, etc.).
     """
+
+    # Skip if already marked complete in game_data
+    try:
+        if _read_json_file(global_vars.POLICE_TRAINING_DONE_FILE) is True:
+            print("Police training already marked complete — skipping.")
+            return False
+    except Exception as e:
+        print(f"WARNING: Could not read police training flag: {e}")
+
     print("\n--- Starting Police Training Operation ---")
 
     # Navigate to Police Recruitment page
@@ -901,6 +911,7 @@ def police_training():
                 print(f"Training Progress: {current}/{total}")
                 if current >= total:
                     print("Training complete. No further action required.")
+                    _write_json_file(global_vars.POLICE_TRAINING_DONE_FILE, True)
                     return False
             else:
                 print("WARNING: Could not parse training progress.")
@@ -909,6 +920,7 @@ def police_training():
             # Final fallback: Check for completion paragraph
             final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]")
             if final_text and "your hard work in training has paid off" in final_text.lower():
+                _write_json_file(global_vars.POLICE_TRAINING_DONE_FILE, True)
                 print("FINAL SUCCESS: Training is now fully complete.")
                 return False
 
