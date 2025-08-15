@@ -720,7 +720,7 @@ def _perform_torch_attempt(player_data):
 
     if "managed to set ablaze" in result_text:
         try:
-            print(f"DEBUG: Torch success result_text: {result_text}")
+            print(f"Torch success result_text: {result_text}")
 
             business_name_re_match = re.search(r'managed to set ablaze the (.+?)!', result_text)
             torched_business_name = selected_business_name
@@ -729,7 +729,7 @@ def _perform_torch_attempt(player_data):
                 torched_business_name = f"{player_data.get('Location', '')} {extracted_name}".strip()
                 torched_business_name = torched_business_name.lower()
             else:
-                print(f"DEBUG: Could not parse torched business name from success message. Using selected_business_name: {selected_business_name}")
+                print(f"Could not parse torched business name from success message. Using selected_business_name: {selected_business_name}")
                 torched_business_name = selected_business_name
 
             cost_match = re.search(r'\$(\d[\d,]*)(?:\s|\.|!)', result_text)
@@ -737,7 +737,7 @@ def _perform_torch_attempt(player_data):
             if cost_match:
                 extracted_cost = int(cost_match.group(1).replace(',', ''))
             else:
-                print(f"DEBUG: Could not parse torched cost from success message. Defaulting to 0.")
+                print(f"Could not parse torched cost from success message. Defaulting to 0.")
 
             print(f"Successfully torched {torched_business_name} at a cost of ${extracted_cost}.")
             log_aggravated_event("Torch", torched_business_name, "Success", extracted_cost)
@@ -804,8 +804,34 @@ def execute_aggravated_crime_logic(player_data):
     mugging_max = global_vars.config.getint('Mugging', 'max_amount', fallback=100)
 
     do_armed_robbery = global_vars.config.getboolean('Armed Robbery', 'DoArmedRobbery', fallback=False)
-
     do_torch = global_vars.config.getboolean('Torch', 'DoTorch', fallback=False)
+
+    # --- PRIORITY: Torch over Armed Robbery when both are enabled ---
+    if do_torch and do_armed_robbery:
+        print("\n--- Aggravated Crimes (priority: Torch first, second Armed Robbery) ---")
+
+        # 1) Try Torch first
+        if _open_aggravated_crime_page("Torch"):
+            if _perform_torch_attempt(player_data):
+                _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+                print("Torch attempt initiated. Main Aggravated Crime cooldown set.")
+                return True
+        else:
+            # If we couldn't even open the page, still consider AR fallback
+            print("FAILED to open Torch page; considering Armed Robbery fallback.")
+
+        # 2) Fallback to Armed Robbery if Torch wasn't viable
+        print("Torch unavailable/no viable targets — trying Armed Robbery…")
+        if _open_aggravated_crime_page("Armed Robbery") and _perform_armed_robbery_attempt(player_data):
+            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+            print("Armed Robbery attempt initiated. Main Aggravated Crime cooldown set.")
+            return True
+
+        # 3) Neither Torch nor AR could be initiated
+        # (Short re-check timers may already be set by the subroutines.)
+        print("No viable Torch or Armed Robbery targets right now.")
+        return False
+
 
     enabled_crimes = [crime_type for crime_type, enabled_status in {
         'Hack': do_hack,

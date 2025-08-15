@@ -240,11 +240,11 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data):
         active.append(('Bank add clients', bank_add))
     if cfg.getboolean('Fire', 'DoFireDuties', fallback=False):
         active.append(('Firefighter Duties', action))
-    if cfg.getboolean('Police', 'Post911', fallback=False) and location == home_city:
+    if cfg.getboolean('Police', 'Post911', fallback=False) and occupation in ["Police Officer"] and location == home_city:
         active.append(('Post 911', post_911))
-    if cfg.getboolean('Police', 'DoCases', fallback=False) and location == home_city:
+    if cfg.getboolean('Police', 'DoCases', fallback=False) and occupation in ["Police Officer"] and location == home_city:
         active.append(('Do Cases', case))
-    if cfg.getboolean('Police', 'DoForensics', fallback=False) and location == home_city:
+    if cfg.getboolean('Police', 'DoForensics', fallback=False) and occupation in ["Police Officer"] and location == home_city:
         effective_forensics = max(action, case)
         active.append(('Forensics', effective_forensics))
 
