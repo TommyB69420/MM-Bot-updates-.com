@@ -352,6 +352,254 @@ def _get_business_owner_and_repay(business_name, amount_stolen, player_data):
         print(f"No owner found for '{business_name}' or repayment not applicable. Skipping repayment.")
         return False
 
+def execute_aggravated_crime_logic(player_data):
+    """Manages hacking, pickpocketing, mugging, armed robberies, and torch operations."""
+
+    do_hack = global_vars.config.getboolean('Hack', 'DoHack', fallback=False)
+    hack_repay = global_vars.config.getboolean('Hack', 'Repay', fallback=False)
+    hack_min = global_vars.config.getint('Hack', 'min_amount', fallback=1)
+    hack_max = global_vars.config.getint('Hack', 'max_amount', fallback=100)
+
+    do_pickpocket = global_vars.config.getboolean('PickPocket', 'DoPickPocket', fallback=False)
+    pickpocket_repay = global_vars.config.getboolean('PickPocket', 'Repay', fallback=False)
+    pickpocket_min = global_vars.config.getint('PickPocket', 'min_amount', fallback=1)
+    pickpocket_max = global_vars.config.getint('PickPocket', 'max_amount', fallback=100)
+
+    do_mugging = global_vars.config.getboolean('Mugging', 'DoMugging', fallback=False)
+    mugging_repay = global_vars.config.getboolean('Mugging', 'Repay', fallback=False)
+    mugging_min = global_vars.config.getint('Mugging', 'min_amount', fallback=1)
+    mugging_max = global_vars.config.getint('Mugging', 'max_amount', fallback=100)
+
+    do_armed_robbery = global_vars.config.getboolean('Armed Robbery', 'DoArmedRobbery', fallback=False)
+    do_torch = global_vars.config.getboolean('Torch', 'DoTorch', fallback=False)
+
+    # --- PRIORITY: Torch over Armed Robbery when both are enabled ---
+    if do_torch and do_armed_robbery:
+        print("\n--- Aggravated Crimes (priority: Torch first, second Armed Robbery) ---")
+
+        # 1) Try Torch first
+        if _open_aggravated_crime_page("Torch"):
+            if _perform_torch_attempt(player_data):
+                _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+                print("Torch attempt initiated. Main Aggravated Crime cooldown set.")
+                return True
+        else:
+            # If we couldn't even open the page, still consider AR fallback
+            print("FAILED to open Torch page; considering Armed Robbery fallback.")
+
+        # 2) Fallback to Armed Robbery if Torch wasn't viable
+        print("Torch unavailable/no viable targets — trying Armed Robbery…")
+        if _open_aggravated_crime_page("Armed Robbery") and _perform_armed_robbery_attempt(player_data):
+            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+            print("Armed Robbery attempt initiated. Main Aggravated Crime cooldown set.")
+            return True
+
+        # 3) Neither Torch nor AR could be initiated
+        # (Short re-check timers may already be set by the subroutines.)
+        print("No viable Torch or Armed Robbery targets right now.")
+        return False
+
+
+    enabled_crimes = [crime_type for crime_type, enabled_status in {
+        'Hack': do_hack,
+        'Pickpocket': do_pickpocket,
+        'Mugging': do_mugging,
+        'Armed Robbery': do_armed_robbery,
+        'Torch': do_torch
+    }.items() if enabled_status]
+
+    if not enabled_crimes:
+        return False
+
+    # Randomly select one of the enabled crimes
+    crime_type = random.choice(enabled_crimes)
+
+    # If Hack was selected but you're not in home city, switch to another enabled crime
+    if crime_type == "Hack":
+        current_city = player_data.get("Location")
+        if current_city != player_data.get("Home City"):
+            fallback_pool = [c for c in enabled_crimes if c != "Hack"]
+            if not fallback_pool:
+                print(f"Skipping Hack: not in home city ('{current_city}' vs '{player_data.get('Home City')}'), and no other crimes enabled.")
+                return False
+            crime_type = random.choice(fallback_pool)
+            print(f"Skipping Hack outside home city. Switching to {crime_type}.")
+
+    print(f"\n--- Beginning Aggravated Crime ({crime_type}) Operation ---")
+
+    crime_attempt_initiated = False
+
+    # Hacking
+    if crime_type == "Hack":
+        min_steal = hack_min
+        max_steal = hack_max
+        cooldown_key = global_vars.MAJOR_CRIME_COOLDOWN_KEY
+
+        # Only hack if in home city
+        current_city = player_data.get("Location")
+        if current_city != player_data.get("Home City"):
+            print(f"Skipping Hack: Current city '{current_city}' is not home city '{player_data.get('Home City')}'.")
+            return False
+
+        if not _open_aggravated_crime_page("Hack"):
+            return False
+
+        attempts_in_cycle = 0
+        max_attempts_per_cycle = 60
+        tried_players_in_cycle = set()
+        retried_no_money = set()
+
+        while attempts_in_cycle < max_attempts_per_cycle:
+            current_target_player = _get_suitable_crime_target(player_data['Home City'], player_data['Character Name'], tried_players_in_cycle, cooldown_key)
+            if not current_target_player:
+                print(f"No more suitable {crime_type} targets found in the database for this cycle.")
+                retry_minutes = random.randint(3, 5)
+                global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
+                print(f"Will retry {crime_type} in {retry_minutes} minutes.")
+                break
+
+            attempts_in_cycle += 1
+            crime_attempt_initiated = True
+            status, target_attempted, amount_stolen = _perform_hack_attempt(current_target_player, min_steal, max_steal, retried_no_money)
+
+            if status == 'success':
+                if hack_repay:
+                    if global_vars.hacked_player_for_repay and global_vars.hacked_amount_for_repay:
+                        _repay_player(global_vars.hacked_player_for_repay, global_vars.hacked_amount_for_repay)
+                print(f"{crime_type} successful! Exiting attempts for this cycle.")
+                break
+            elif status in ['cooldown_target', 'not_online', 'no_money', 'non_existent_target', 'wrong_city']:
+                tried_players_in_cycle.add(target_attempted)
+                if not _open_aggravated_crime_page("Hack"):
+                    print(f"FAILED: Failed to re-open {crime_type} page. Cannot continue attempts for this cycle.")
+                    break
+            elif status in ['failed_password', 'failed_attempt', 'failed_proxy', 'general_error']:
+                print(f"{crime_type} failed for {target_attempted} (status: {status}). Exiting attempts for this cycle.")
+                break
+
+    # Pickpocket
+    elif crime_type == "Pickpocket":
+        min_steal = pickpocket_min
+        max_steal = pickpocket_max
+        cooldown_key = global_vars.MINOR_CRIME_COOLDOWN_KEY
+
+        if not _open_aggravated_crime_page(crime_type):
+            return False
+
+        attempts_in_cycle = 0
+        max_attempts_per_cycle = 60
+        tried_players_in_cycle = set()
+
+        while attempts_in_cycle < max_attempts_per_cycle:
+            current_target_player = _get_suitable_pickpocket_target_online(player_data['Character Name'], tried_players_in_cycle)
+            if not current_target_player:
+                print(f"No more suitable {crime_type} targets found in the database for this cycle.")
+                retry_minutes = random.randint(3, 5)
+                global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
+                print(f"Will retry {crime_type} in {retry_minutes} minutes.")
+                break
+
+            attempts_in_cycle += 1
+            crime_attempt_initiated = True
+            status, target_attempted, amount_stolen = _perform_pickpocket_attempt(current_target_player, min_steal, max_steal)
+
+            if status == 'success':
+                if pickpocket_repay:
+                    if global_vars.pickpocketed_player_for_repay and global_vars.pickpocketed_amount_for_repay:
+                        _repay_player(global_vars.pickpocketed_player_for_repay, global_vars.pickpocketed_amount_for_repay)
+                print(f"{crime_type} successful! Exiting attempts for this cycle.")
+                break
+            elif status in ['cooldown_target', 'not_online', 'no_money', 'failed_proxy', 'non_existent_target', 'wrong_city']:
+                tried_players_in_cycle.add(target_attempted)
+                if not _open_aggravated_crime_page(crime_type):
+                    print(f"FAILED: Failed to re-open {crime_type} page. Cannot continue attempts for this cycle.")
+                    break
+            elif status in ['failed_password', 'failed_attempt', 'general_error']:
+                print(f"{crime_type} failed for {target_attempted} (status: {status}). Exiting attempts for this cycle.")
+                break
+
+    # Mugging
+    elif crime_type == "Mugging":
+        min_steal = mugging_min
+        max_steal = mugging_max
+        cooldown_key = global_vars.MINOR_CRIME_COOLDOWN_KEY
+
+        if not _open_aggravated_crime_page(crime_type):
+            return False
+
+        attempts_in_cycle = 0
+        max_attempts_per_cycle = 60
+        tried_players_in_cycle = set()
+
+        while attempts_in_cycle < max_attempts_per_cycle:
+            current_target_player = _get_suitable_pickpocket_target_online(player_data['Character Name'], tried_players_in_cycle)
+            if not current_target_player:
+                print(f"No more suitable {crime_type} targets found in the database for this cycle.")
+                retry_minutes = random.randint(3, 5)
+                global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
+                print(f"Will retry {crime_type} in {retry_minutes} minutes.")
+                break
+
+            attempts_in_cycle += 1
+            crime_attempt_initiated = True
+            status, target_attempted, amount_stolen = _perform_mugging_attempt(current_target_player, min_steal, max_steal)
+
+            if status == 'success':
+                if mugging_repay:
+                    if global_vars.mugging_player_for_repay and global_vars.mugging_amount_for_repay:
+                        _repay_player(global_vars.mugging_player_for_repay, global_vars.mugging_amount_for_repay)
+                print(f"{crime_type} successful! Exiting attempts for this cycle.")
+                break
+            elif status in ['cooldown_target', 'not_online', 'no_money', 'failed_proxy', 'non_existent_target', 'wrong_city']:
+                tried_players_in_cycle.add(target_attempted)
+                if not _open_aggravated_crime_page(crime_type):
+                    print(f"FAILED: Failed to re-open {crime_type} page. Cannot continue attempts for this cycle.")
+                    break
+            elif status in ['failed_password', 'failed_attempt', 'general_error']:
+                print(f"{crime_type} failed for {target_attempted} (status: {status}). Exiting attempts for this cycle.")
+                break
+
+    # Armed Robbery
+    elif crime_type == "Armed Robbery":
+        if not _open_aggravated_crime_page("Armed Robbery"):
+            return False
+        if _perform_armed_robbery_attempt(player_data):
+            crime_attempt_initiated = True
+            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+            print("Armed Robbery attempt initiated. Main Aggravated Crime cooldown set.")
+            return True
+        else:
+            print("Armed Robbery attempt not initiated (e.g., no suitable targets found or pre-attempt failures).")
+            return False
+
+    # Torch
+    elif crime_type == "Torch":
+        if not _open_aggravated_crime_page("Torch"):
+            return False
+        if _perform_torch_attempt(player_data):
+            crime_attempt_initiated = True
+            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+            print("Torch attempt initiated. Main Aggravated Crime cooldown set.")
+            return True
+        else:
+            print("Torch: No eligible targets with asterisk found. Skipping general cooldown for now.")
+            return False
+
+    # --- Final cooldown handling ---
+    short_retry_set = (global_vars._script_aggravated_crime_recheck_cooldown_end_time and global_vars._script_aggravated_crime_recheck_cooldown_end_time > datetime.datetime.now())
+
+    if crime_attempt_initiated and not short_retry_set:
+        _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
+        print(f"Finished {crime_type} attempts for this cycle. Aggravated Crime cooldown set.")
+        return True
+    elif not short_retry_set:
+        retry_minutes = random.randint(3, 5)
+        global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
+        print(f"Finished {crime_type} attempts for this cycle. No crime attempt initiated. Will retry in {retry_minutes} minutes.")
+        return False
+    else:
+        print(f"Short retry cooldown already set for {crime_type}. Skipping long cooldown.")
+        return False
 
 def _perform_pickpocket_attempt(target_player_name, min_steal, max_steal):
     """Performs a pickpocketing attempt."""
@@ -420,8 +668,11 @@ def _perform_pickpocket_attempt(target_player_name, min_steal, max_steal):
     log_aggravated_event(crime_type, target_player_name, "Failed", 0)
     return 'general_error', target_player_name, None
 
-def _perform_hack_attempt(target_player_name, min_steal, max_steal):
+def _perform_hack_attempt(target_player_name, min_steal, max_steal, retried_targets=None):
     """Performs a single hacking attempt."""
+
+    if retried_targets is None:
+        retried_targets = set()
 
     global_vars.hacked_player_for_repay = None
     global_vars.hacked_amount_for_repay = None
@@ -455,16 +706,29 @@ def _perform_hack_attempt(target_player_name, min_steal, max_steal):
         return 'non_existent_target', target_player_name, None
 
     if "no money in their account" in result_text:
+        # Allow the transfer+retry only once per target (for this cycle)
+        if target_player_name in retried_targets:
+            print(
+                f"INFO: Target '{target_player_name}' still has no money and retry already used. Skipping further retries.")
+            set_player_data(target_player_name, global_vars.MAJOR_CRIME_COOLDOWN_KEY, now + datetime.timedelta(hours=1))
+            return 'no_money', target_player_name, None
+
         print(f"INFO: Target '{target_player_name}' has no money. Sending $1 and retrying once...")
         if transfer_money(1, target_player_name):
+            retried_targets.add(target_player_name)
             print("Transfer successful. Retrying hack on same target using configured amount...")
+            # Re-open Hack page after returning from Bank so the Hack form exists again
+            if not _open_aggravated_crime_page("Hack"):
+                print("FAILED: Could not re-open Hack page after transfer. Aborting retry.")
+                return 'general_error', target_player_name, None
+            # Re-enter details in the same way you already do (kept identical to your current flow)
             if not _find_and_send_keys(By.XPATH, "//input[@name='hack']", target_player_name):
                 return 'general_error', target_player_name, None
             if not _find_and_send_keys(By.XPATH, "//input[@name='cap']", str(steal_amount)):
                 return 'general_error', target_player_name, None
             if not _find_and_click(By.XPATH, "//input[@name='B1']", pause=global_vars.ACTION_PAUSE_SECONDS * 2):
                 return 'general_error', target_player_name, None
-            # Do not handle results here, just let the function continue below
+            # Read the new result and continue evaluation below
             result_text = _get_element_text(By.XPATH, "/html/body/div[4]/div[4]/div[1]") or ""
         else:
             print("Failed to transfer $1, skipping retry.")
@@ -784,236 +1048,6 @@ def _perform_torch_attempt(player_data):
         log_aggravated_event("Torch", selected_business_name, "Unexpected Result", 0)
         global_vars.torch_successful = False
         return True
-
-def execute_aggravated_crime_logic(player_data):
-    """Manages hacking, pickpocketing, mugging, armed robberies, and torch operations."""
-
-    do_hack = global_vars.config.getboolean('Hack', 'DoHack', fallback=False)
-    hack_repay = global_vars.config.getboolean('Hack', 'Repay', fallback=False)
-    hack_min = global_vars.config.getint('Hack', 'min_amount', fallback=1)
-    hack_max = global_vars.config.getint('Hack', 'max_amount', fallback=100)
-
-    do_pickpocket = global_vars.config.getboolean('PickPocket', 'DoPickPocket', fallback=False)
-    pickpocket_repay = global_vars.config.getboolean('PickPocket', 'Repay', fallback=False)
-    pickpocket_min = global_vars.config.getint('PickPocket', 'min_amount', fallback=1)
-    pickpocket_max = global_vars.config.getint('PickPocket', 'max_amount', fallback=100)
-
-    do_mugging = global_vars.config.getboolean('Mugging', 'DoMugging', fallback=False)
-    mugging_repay = global_vars.config.getboolean('Mugging', 'Repay', fallback=False)
-    mugging_min = global_vars.config.getint('Mugging', 'min_amount', fallback=1)
-    mugging_max = global_vars.config.getint('Mugging', 'max_amount', fallback=100)
-
-    do_armed_robbery = global_vars.config.getboolean('Armed Robbery', 'DoArmedRobbery', fallback=False)
-    do_torch = global_vars.config.getboolean('Torch', 'DoTorch', fallback=False)
-
-    # --- PRIORITY: Torch over Armed Robbery when both are enabled ---
-    if do_torch and do_armed_robbery:
-        print("\n--- Aggravated Crimes (priority: Torch first, second Armed Robbery) ---")
-
-        # 1) Try Torch first
-        if _open_aggravated_crime_page("Torch"):
-            if _perform_torch_attempt(player_data):
-                _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
-                print("Torch attempt initiated. Main Aggravated Crime cooldown set.")
-                return True
-        else:
-            # If we couldn't even open the page, still consider AR fallback
-            print("FAILED to open Torch page; considering Armed Robbery fallback.")
-
-        # 2) Fallback to Armed Robbery if Torch wasn't viable
-        print("Torch unavailable/no viable targets — trying Armed Robbery…")
-        if _open_aggravated_crime_page("Armed Robbery") and _perform_armed_robbery_attempt(player_data):
-            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
-            print("Armed Robbery attempt initiated. Main Aggravated Crime cooldown set.")
-            return True
-
-        # 3) Neither Torch nor AR could be initiated
-        # (Short re-check timers may already be set by the subroutines.)
-        print("No viable Torch or Armed Robbery targets right now.")
-        return False
-
-
-    enabled_crimes = [crime_type for crime_type, enabled_status in {
-        'Hack': do_hack,
-        'Pickpocket': do_pickpocket,
-        'Mugging': do_mugging,
-        'Armed Robbery': do_armed_robbery,
-        'Torch': do_torch
-    }.items() if enabled_status]
-
-    if not enabled_crimes:
-        return False
-
-    # Randomly select one of the enabled crimes
-    crime_type = random.choice(enabled_crimes)
-    print(f"\n--- Beginning Aggravated Crime ({crime_type}) Operation ---")
-
-    crime_attempt_initiated = False
-
-    # Hacking
-    if crime_type == "Hack":
-        min_steal = hack_min
-        max_steal = hack_max
-        cooldown_key = global_vars.MAJOR_CRIME_COOLDOWN_KEY
-
-        if not _open_aggravated_crime_page(crime_type):
-            return False
-
-        attempts_in_cycle = 0
-        max_attempts_per_cycle = 60
-        tried_players_in_cycle = set()
-
-        while attempts_in_cycle < max_attempts_per_cycle:
-            current_target_player = _get_suitable_crime_target(player_data['Home City'], player_data['Character Name'], tried_players_in_cycle, cooldown_key)
-            if not current_target_player:
-                print(f"No more suitable {crime_type} targets found in the database for this cycle.")
-                retry_minutes = random.randint(3, 5)
-                global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
-                print(f"Will retry {crime_type} in {retry_minutes} minutes.")
-                break
-
-            attempts_in_cycle += 1
-            crime_attempt_initiated = True
-            status, target_attempted, amount_stolen = _perform_hack_attempt(current_target_player, min_steal, max_steal)
-
-            if status == 'success':
-                if hack_repay:
-                    if global_vars.hacked_player_for_repay and global_vars.hacked_amount_for_repay:
-                        _repay_player(global_vars.hacked_player_for_repay, global_vars.hacked_amount_for_repay)
-                print(f"{crime_type} successful! Exiting attempts for this cycle.")
-                break
-            elif status in ['cooldown_target', 'not_online', 'no_money', 'non_existent_target', 'wrong_city']:
-                tried_players_in_cycle.add(target_attempted)
-                if not _open_aggravated_crime_page(crime_type):
-                    print(f"FAILED: Failed to re-open {crime_type} page. Cannot continue attempts for this cycle.")
-                    break
-            elif status in ['failed_password', 'failed_attempt', 'failed_proxy', 'general_error']:
-                print(f"{crime_type} failed for {target_attempted} (status: {status}). Exiting attempts for this cycle.")
-                break
-
-    # Pickpocket
-    elif crime_type == "Pickpocket":
-        min_steal = pickpocket_min
-        max_steal = pickpocket_max
-        cooldown_key = global_vars.MINOR_CRIME_COOLDOWN_KEY
-
-        if not _open_aggravated_crime_page(crime_type):
-            return False
-
-        attempts_in_cycle = 0
-        max_attempts_per_cycle = 60
-        tried_players_in_cycle = set()
-
-        while attempts_in_cycle < max_attempts_per_cycle:
-            current_target_player = _get_suitable_pickpocket_target_online(player_data['Character Name'], tried_players_in_cycle)
-            if not current_target_player:
-                print(f"No more suitable {crime_type} targets found in the database for this cycle.")
-                retry_minutes = random.randint(3, 5)
-                global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
-                print(f"Will retry {crime_type} in {retry_minutes} minutes.")
-                break
-
-            attempts_in_cycle += 1
-            crime_attempt_initiated = True
-            status, target_attempted, amount_stolen = _perform_pickpocket_attempt(current_target_player, min_steal, max_steal)
-
-            if status == 'success':
-                if pickpocket_repay:
-                    if global_vars.pickpocketed_player_for_repay and global_vars.pickpocketed_amount_for_repay:
-                        _repay_player(global_vars.pickpocketed_player_for_repay, global_vars.pickpocketed_amount_for_repay)
-                print(f"{crime_type} successful! Exiting attempts for this cycle.")
-                break
-            elif status in ['cooldown_target', 'not_online', 'no_money', 'failed_proxy', 'non_existent_target', 'wrong_city']:
-                tried_players_in_cycle.add(target_attempted)
-                if not _open_aggravated_crime_page(crime_type):
-                    print(f"FAILED: Failed to re-open {crime_type} page. Cannot continue attempts for this cycle.")
-                    break
-            elif status in ['failed_password', 'failed_attempt', 'general_error']:
-                print(f"{crime_type} failed for {target_attempted} (status: {status}). Exiting attempts for this cycle.")
-                break
-
-    # Mugging
-    elif crime_type == "Mugging":
-        min_steal = mugging_min
-        max_steal = mugging_max
-        cooldown_key = global_vars.MINOR_CRIME_COOLDOWN_KEY
-
-        if not _open_aggravated_crime_page(crime_type):
-            return False
-
-        attempts_in_cycle = 0
-        max_attempts_per_cycle = 60
-        tried_players_in_cycle = set()
-
-        while attempts_in_cycle < max_attempts_per_cycle:
-            current_target_player = _get_suitable_pickpocket_target_online(player_data['Character Name'], tried_players_in_cycle)
-            if not current_target_player:
-                print(f"No more suitable {crime_type} targets found in the database for this cycle.")
-                retry_minutes = random.randint(3, 5)
-                global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
-                print(f"Will retry {crime_type} in {retry_minutes} minutes.")
-                break
-
-            attempts_in_cycle += 1
-            crime_attempt_initiated = True
-            status, target_attempted, amount_stolen = _perform_mugging_attempt(current_target_player, min_steal, max_steal)
-
-            if status == 'success':
-                if mugging_repay:
-                    if global_vars.mugging_player_for_repay and global_vars.mugging_amount_for_repay:
-                        _repay_player(global_vars.mugging_player_for_repay, global_vars.mugging_amount_for_repay)
-                print(f"{crime_type} successful! Exiting attempts for this cycle.")
-                break
-            elif status in ['cooldown_target', 'not_online', 'no_money', 'failed_proxy', 'non_existent_target', 'wrong_city']:
-                tried_players_in_cycle.add(target_attempted)
-                if not _open_aggravated_crime_page(crime_type):
-                    print(f"FAILED: Failed to re-open {crime_type} page. Cannot continue attempts for this cycle.")
-                    break
-            elif status in ['failed_password', 'failed_attempt', 'general_error']:
-                print(f"{crime_type} failed for {target_attempted} (status: {status}). Exiting attempts for this cycle.")
-                break
-
-    # Armed Robbery
-    elif crime_type == "Armed Robbery":
-        if not _open_aggravated_crime_page("Armed Robbery"):
-            return False
-        if _perform_armed_robbery_attempt(player_data):
-            crime_attempt_initiated = True
-            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
-            print("Armed Robbery attempt initiated. Main Aggravated Crime cooldown set.")
-            return True
-        else:
-            print("Armed Robbery attempt not initiated (e.g., no suitable targets found or pre-attempt failures).")
-            return False
-
-    # Torch
-    elif crime_type == "Torch":
-        if not _open_aggravated_crime_page("Torch"):
-            return False
-        if _perform_torch_attempt(player_data):
-            crime_attempt_initiated = True
-            _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
-            print("Torch attempt initiated. Main Aggravated Crime cooldown set.")
-            return True
-        else:
-            print("Torch: No eligible targets with asterisk found. Skipping general cooldown for now.")
-            return False
-
-    # --- Final cooldown handling ---
-    short_retry_set = (global_vars._script_aggravated_crime_recheck_cooldown_end_time and global_vars._script_aggravated_crime_recheck_cooldown_end_time > datetime.datetime.now())
-
-    if crime_attempt_initiated and not short_retry_set:
-        _set_last_timestamp(global_vars.AGGRAVATED_CRIME_LAST_ACTION_FILE, datetime.datetime.now())
-        print(f"Finished {crime_type} attempts for this cycle. Aggravated Crime cooldown set.")
-        return True
-    elif not short_retry_set:
-        retry_minutes = random.randint(3, 5)
-        global_vars._script_aggravated_crime_recheck_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=retry_minutes)
-        print(f"Finished {crime_type} attempts for this cycle. No crime attempt initiated. Will retry in {retry_minutes} minutes.")
-        return False
-    else:
-        print(f"Short retry cooldown already set for {crime_type}. Skipping long cooldown.")
-        return False
 
 def _perform_mugging_attempt(target_player_name, min_steal, max_steal):
     """Performs a mugging attempt."""

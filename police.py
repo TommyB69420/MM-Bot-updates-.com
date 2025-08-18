@@ -315,13 +315,8 @@ def prepare_police_cases(character_name):
         if picked:
             # Open selected case
             try:
-                picked.find_element(
-                    By.XPATH, ".//input[@type='radio' and (@name='case' or contains(@name,'case'))]"
-                ).click()
-                btn = _find_element(
-                    By.XPATH,
-                    "//input[@type='submit' and (contains(@value,'Select Case') or normalize-space(@value)='Select')]"
-                )
+                picked.find_element(By.XPATH, ".//input[@type='radio' and (@name='case' or contains(@name,'case'))]").click()
+                btn = _find_element(By.XPATH, "//input[@type='submit' and (contains(@value,'Select Case') or normalize-space(@value)='Select')]")
                 if btn:
                     btn.click()
                 else:
@@ -759,11 +754,11 @@ def solve_case(character_name):
                 send_discord_notification(f"Closed via 911: {cues.get('agg_time') or _get_case_cell('Time of Crime:')} | "f"{cues.get('victim') or _get_case_cell('Victim:')} → **{infer}**")
                 return True
 
-            # Cache gave nothing → Forensics flow if enabled
+            # Cache gave nothing - Forensics flow if enabled
             cfg = configparser.ConfigParser()
             cfg.read('settings.ini')
             if cfg.getboolean('Police', 'DoForensics', fallback=False):
-                # Use timers fetched in Main (no scraping here)
+                # Use timers fetched in Main
                 timers = getattr(global_vars, 'jail_timers', {}) or {}
                 action_remaining = float(timers.get('action_time_remaining', float('inf')))
 

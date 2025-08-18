@@ -12,7 +12,7 @@ from helper_functions import _find_and_send_keys, _find_and_click, _find_element
 from timer_functions import get_game_timer_remaining, get_all_active_game_timers
 
 
-def execute_community_services_logic(player_data):
+def community_services(player_data):
     """Manages and performs community service operations based on the player's location."""
     print("\n--- Beginning Community Service Operation ---")
 
@@ -74,7 +74,7 @@ def execute_community_services_logic(player_data):
     global_vars._script_action_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
     return False
 
-def execute_manufacture_drugs_logic(player_data):
+def manufacture_drugs(player_data):
     """
     Manages and performs drug manufacturing operations.
     Only works if occupation is 'Gangster'.
@@ -131,132 +131,124 @@ def execute_manufacture_drugs_logic(player_data):
     print("Successfully initiated drug manufacturing.")
     return True
 
-def execute_launder_logic(player_data):
-    """Manages and performs money laundering operations when outside home city."""
-    print("\n--- Beginning Money Laundering Operation ---")
+def laundering(player_data):
+    """Launder dirty money via Income menu. Can set preferred launder contacts in settings.ini"""
 
-    dirty_money = player_data.get("Dirty Money", 0)
+    print("\n--- Money Laundering ---")
 
-    launder_reserve = global_vars.config.getint('Launder', 'Reserve', fallback=0)
-    preferred_launder_players_raw = global_vars.config.get('Launder', 'Preferred', fallback='').strip()
-    preferred_launder_players = {name.strip().lower() for name in preferred_launder_players_raw.split(',') if name.strip()}
+    # Load player money + launder config
+    dirty = int(player_data.get("Dirty Money", 0))
+    reserve = global_vars.config.getint("Launder", "Reserve", fallback=0)
+    preferred_raw = global_vars.config.get("Launder", "Preferred", fallback="").strip()
+    preferred = {n.strip().lower() for n in preferred_raw.split(",") if n.strip()}
 
-    launder_blacklist_raw = global_vars.config.get('Launder', 'Blacklist_Launderers', fallback='').strip()
-    launder_blacklist = {name.strip().lower() for name in launder_blacklist_raw.split(',') if name.strip()}
-
-    if dirty_money <= launder_reserve:
-        print(f"Skipping Money Laundering: Dirty money (${dirty_money}) is at or below reserve (${launder_reserve}). Setting specific cooldown.")
-        global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(300, 600))  # Set 5-10 minute cooldown if not enough dirty money
+    # Skip if dirty money is not above reserve
+    if dirty <= reserve:
+        print(f"Skip: dirty ${dirty} ≤ reserve ${reserve}.")
+        global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(300, 600))  # 5–10 min backoff
         return False
 
-    # --- Direct navigation to the laundering page ---
-    launder_url = "https://mafiamatrix.com/income/laundering.asp"
-    print(f"Directly navigating to Money Laundering Page: {launder_url}")
-    try:
-        global_vars.driver.get(launder_url)
-        time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)  # Give page time to load
-    except Exception as e:
-        print(f"FAILED: Direct navigation to Money Laundering page failed: {e}.")
+    # Navigate via Income → Money Laundering
+    if not _navigate_to_page_via_menu(
+        "//span[@class='income']",
+        "//a[normalize-space()='Money Laundering']",
+        "Money Laundering Page"):
+        print("FAILED: open Money Laundering via menu.")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    print("Successfully navigated to Money Laundering Page. Checking for contacts...")
-
-    launder_contacts_table_xpath = "/html/body/div[4]/div[4]/div[2]/div[2]/table"
-    launder_contacts_table = _find_element(By.XPATH, launder_contacts_table_xpath)
-
-    if not launder_contacts_table:
-        print("No laundering contacts table found. Retrying in 30 minutes.")
+    # Find laundering contacts table
+    table = _find_element(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/table")
+    if not table:
+        print("No laundering contacts. Backing off 30m.")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=30)
         return False
 
-    # Get all rows excluding the header (assuming first tr is the header)
-    launderer_rows = launder_contacts_table.find_elements(By.TAG_NAME, "tr")[1:]
+    # Gather all rows (excluding header)
+    rows = table.find_elements(By.TAG_NAME, "tr")[1:]
+    target_link = None
+    fallback_link = None
 
-    target_launderer_link_xpath = None
-    first_available_non_blacklisted_xpath = None
-
-    for i, row in enumerate(launderer_rows):
+    # Scan rows for preferred/fallback launderer
+    for row in rows:
         try:
-            current_launderer_name_element = row.find_element(By.XPATH, ".//td[1]/a")
-            current_launderer_name = current_launderer_name_element.text.strip()
+            link = row.find_element(By.XPATH, ".//td[1]/a")
+            name = (link.text or "").strip()
+            if not name:
+                continue
+            lname = name.lower()
 
-            # Construct the XPath for the current launderer's link
-            current_launderer_xpath = f"{launder_contacts_table_xpath}/tbody/tr[{i + 2}]/td[1]/a"
+            # If preferred launderer is found; stop here
+            if lname in preferred:
+                target_link = link
+                print(f"Preferred launderer: {name}")
+                break
 
-            if current_launderer_name.lower() in preferred_launder_players:
-                target_launderer_link_xpath = current_launderer_xpath
-                print(f"Found preferred launderer: {current_launderer_name}")
-                break  # Found a preferred launderer, no need to look further
+            # If no preferred found yet, keep track of the first available one
+            if fallback_link is None:
+                fallback_link = link
+                print(f"Set first available launderer as fallback: {name}")
 
-            # If no preferred found yet, keep track of the first non-blacklisted one
-            if not first_available_non_blacklisted_xpath and \
-                    current_launderer_name.lower() not in launder_blacklist:
-                first_available_non_blacklisted_xpath = current_launderer_xpath
-                print(f"Set first available non-blacklisted launderer as fallback: {current_launderer_name}")
-
-        except NoSuchElementException:
-            print(f"Warning: Could not find name element in row {i + 2}. Skipping row.")
-            continue
-        except Exception as e:
-            print(f"Error parsing launderer row {i + 2}: {e}. Skipping row.")
+        except Exception:
             continue
 
-    # If no preferred launderer was found, use the first available
-    if not target_launderer_link_xpath:
-        if first_available_non_blacklisted_xpath:
-            target_launderer_link_xpath = first_available_non_blacklisted_xpath
-            print("No preferred launderer found, using the first available non-blacklisted.")
-        else:
-            print("No suitable launderers found (all preferred not available or all blacklisted). Retrying in 30 minutes.")
+    # Use fallback if no preferred launderer was found
+    if not target_link:
+        if not fallback_link:
+            print("No suitable launderers. Backing off 30m.")
             global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=30)
             return False
+        target_link = fallback_link
+        print("No preferred launderer found, using first available.")
 
-    # --- Click on the selected launderer's link ---
-    if not _find_and_click(By.XPATH, target_launderer_link_xpath, timeout=global_vars.EXPLICIT_WAIT_SECONDS, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
-        print(f"FAILED: Could not click on laundering contact via XPath: {target_launderer_link_xpath}.")
+    # Click into chosen launderer
+    try:
+        target_link.click()
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
+    except Exception as e:
+        print(f"FAILED: click launderer: {e}")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    max_launder_amount_text = _get_element_text(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form[1]/p[1]/font")
-    if not max_launder_amount_text:
-        print("ERROR: Max launder amount text not found on this contact's page. Skipping laundering attempt.")
+    # Read max launderable amount from contact page
+    max_text = _get_element_text(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form[1]/p[1]/font")
+    if not max_text:
+        print("No 'max' text on contact page.")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    max_launder_match = re.search(r'\$(\d[\d,]*)\s*max', max_launder_amount_text)
-    if not max_launder_match:
-        print("WARNING: Could not parse max launderable amount. Skipping laundering attempt.")
+    m = re.search(r"\$(\d[\d,]*)\s*max", max_text)
+    if not m:
+        print("Couldn't parse max amount.")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    max_launder_amount = int(max_launder_match.group(1).replace(',', ''))
-    print(f"Max launderable amount: ${max_launder_amount}")
+    max_amt = int(m.group(1).replace(",", ""))
 
-    amount_to_launder = min(max_launder_amount, dirty_money - launder_reserve)
-
-    if amount_to_launder <= 0:
-        print(f"Not enough dirty money to launder after reserve, or max launderable amount is too low. Dirty: ${dirty_money}, Reserve: ${launder_reserve}, Max Launder: ${max_launder_amount}. Setting specific cooldown.")
+    # Launder only what fits under (dirty – reserve) and contact’s max
+    amt = min(max_amt, dirty - reserve)
+    if amt <= 0:
+        print(f"Nothing to launder (dirty ${dirty}, reserve ${reserve}, max ${max_amt}).")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(300, 600))
         return False
 
-    launder_input_xpath = "/html/body/div[4]/div[4]/div[2]/div[2]/form[1]/p[1]/input"
-    if not _find_and_send_keys(By.XPATH, launder_input_xpath, str(int(amount_to_launder))):
-        print("FAILED: Could not enter amount to launder.")
+    # Enter amount to launder
+    if not _find_and_send_keys(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form[1]/p[1]/input", str(amt)):
+        print("FAILED: enter amount.")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    submit_button_xpath = "/html/body/div[4]/div[4]/div[2]/div[2]/form[1]/p[2]/input"
-    if not _find_and_click(By.XPATH, submit_button_xpath):
-        print("FAILED: Could not click 'Launder' button.")
+    # Click submit
+    if not _find_and_click(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form[1]/p[2]/input"):
+        print("FAILED: click 'Launder'.")
         global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    print(f"Successfully initiated laundering of ${int(amount_to_launder)}.")
-
+    print(f"Successfully initiated laundering of ${amt}.")
     return True
 
-def execute_medical_casework_logic(player_data):
+
+def medical_casework(player_data):
     """
     Manages and processes hospital casework.
     Only works if occupation is 'Nurse', 'Doctor', 'Surgeon' or 'Hospital Director'.
@@ -340,249 +332,68 @@ def execute_medical_casework_logic(player_data):
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=medical_case_time_remaining)
         else:
             print("No casework tasks found. Setting fallback cooldown.")
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 43))
+            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(8, 14))
         return task_clicked
     else:
         print("No casework tasks found. Setting fallback cooldown.")
-        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 43))
+        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(8, 14))
         return False
 
-
-def execute_engineering_casework_logic(player_data):
+def engineering_casework(player_data):
     """
-    Manages and processes engineering cases (repairs/constructions).
-    Only works if the occupation is 'Mechanic', 'Technician', 'Engineer', or 'Chief Engineer'.
+    Super-simple engineering: open Maintenance & Construction via Income menu,
+    pick the first available job, submit. No prioritization.
     """
-    print("\n--- Beginning Engineering Casework Operation ---")
+    import datetime, random, time
+    from selenium.webdriver.common.by import By
+    import global_vars
+    from helper_functions import _navigate_to_page_via_menu, _find_elements
 
-    # Navigate directly to the Maintenance and Construction page using its URL
-    # TOM TO REMOVE DIRECT NAVIGATION NEXT TIME IN ENGINEERING
-    engineering_url = "https://mafiamatrix.com/income/construction.asp"
-    print(f"Navigating directly to Engineering page: {engineering_url}")
-    try:
-        global_vars.driver.get(engineering_url)
-        time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)  # Give page time to load
-    except Exception as e:
-        print(f"FAILED: Direct navigation to Engineering page failed: {e}.")
+    print("\n--- Beginning Engineering Casework ---")
+
+    # Navigate via menus
+    if not _navigate_to_page_via_menu(
+        "//span[@class='income']",
+        "//a[normalize-space()='Maintenance and Construction']",
+        "Maintenance and Construction Page"
+    ):
+        print("FAILED: Navigation to Maintenance and Construction page failed.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    print("Successfully navigated to Maintenance and Construction page. Checking for tasks...")
+    print("On Maintenance & Construction. Looking for the first available task…")
 
-    all_table_details = _get_element_attribute(By.XPATH,
-                                               ".//*[@id='content']/div[@id='shop_holder']/div[@id='holder_content']",
-                                               "innerHTML")
-
-    if not all_table_details:
-        print("Could not retrieve maintenance and construction details. Setting short cooldown.")
+    # Grab the first visible radio input anywhere under holder_content
+    radios = _find_elements(By.XPATH, ".//*[@id='holder_content']//input[@type='radio']")
+    if not radios:
+        print("No selectable tasks (no radio inputs found). Short cooldown.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
         return False
 
-    tables = all_table_details.split("<div class=")
-
-    # Ensure all expected sections are present before proceeding.
-    # The indexes (1, 2, 3, 4) depend on the exact HTML structure and how many 'div class=' splits result.
-    # It's safer to check for known content within these sections.
-    building_requests = tables[1] if len(tables) > 1 else ""
-    business_repair = tables[2] if len(tables) > 2 else ""
-    vehicle_repair = tables[3] if len(tables) > 3 else ""
-    vault_construction = tables[4] if len(tables) > 4 else ""
-
-    id_to_repair = None
-    what_to_repair = None
-    which_submit_button_index = None
-    submit_buttons_count = 0  # Count how many forms with submit buttons are encountered
-
-    # Prioritization for repairs/construction. Higher in list means higher priority.
-    priority_list = ['VAULT', 'CREW_FRONT', 'Brahma', 'Palace', 'Penthouse', 'BUSINESS_REPAIR', 'Studio', 'Flat',
-                     'Galaxy', 'Solaris', 'Nekkar', 'Scorpii', 'Electra', 'Sirius']
-
-    # --- Check Building Requests (Apartments/Crew Fronts) ---
-    if 'id="fail"' in building_requests or not building_requests.strip():
-        print("MECHANIC - No building requests.")
-    else:
-        print("MECHANIC - Checking building requests.")
-        submit_buttons_count += 1
-        building_requests_details = building_requests.split("<tr>")
-        for this_repair_html in building_requests_details:
-            if 'label for' in this_repair_html:
-                try:
-                    repair_id_match = re.search(r'id="([^"]+)"', this_repair_html)
-                    repair_vehicle_match = re.search(r'label for="[^"]+">([^<]+)</label>', this_repair_html)
-                    repair_name_match = re.search(r'label for="[^"]+">([^<]+)</label>', this_repair_html)
-
-                    if repair_id_match and repair_vehicle_match and repair_name_match:
-                        repair_id = repair_id_match.group(1).strip()
-                        repair_vehicle = re.sub('[^a-zA-Z]', "", repair_vehicle_match.group(1).strip())
-                        repair_name = repair_name_match.group(1).strip()
-
-                        if player_data['Character Name'] == repair_name:
-                            print(f"MECHANIC - Skipping your own building request: {repair_vehicle} for {repair_name}.")
-                            continue
-
-                        if 'Palace' in repair_vehicle or 'Penthouse' in repair_vehicle or 'Studio' in repair_vehicle or 'Flat' in repair_vehicle:
-                            pass
-                        else:
-                            repair_vehicle = "CREW_FRONT"  # Assume a crew front if not specific
-
-                        current_priority_index = priority_list.index(
-                            what_to_repair) if what_to_repair and what_to_repair in priority_list else -1
-                        new_priority_index = priority_list.index(
-                            repair_vehicle) if repair_vehicle in priority_list else -1
-
-                        if new_priority_index > current_priority_index:  # Higher index means lower priority, so we want lower new_priority_index
-                            print(f"MECHANIC - Found higher priority building task: {repair_vehicle} (Priority: {new_priority_index}) vs current {what_to_repair} (Priority: {current_priority_index})")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                        elif what_to_repair is None:
-                            print(f"MECHANIC - First building task found: {repair_vehicle}")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-
-                except Exception as e:
-                    print(f"Error parsing building repair row: {e}. Skipping row.")
-
-    # --- Check Business Repair ---
-    if 'id="fail"' in business_repair or not business_repair.strip():
-        print("MECHANIC - No business repairs.")
-    else:
-        print("MECHANIC - Checking business repairs.")
-        submit_buttons_count += 1
-        business_repair_details = business_repair.split("<tr>")
-        for this_repair_html in business_repair_details:
-            if 'label for' in this_repair_html:
-                try:
-                    repair_id_match = re.search(r'id="([^"]+)"', this_repair_html)
-                    repair_vehicle_match = re.search(r'\d+">([^<]+)</', this_repair_html)  # Re-evaluate this regex for consistency
-                    repair_name_match = re.search(r'\d+">([^<]+)</', this_repair_html)  # Re-evaluate this regex for consistency
-
-                    if repair_id_match and repair_vehicle_match and repair_name_match:
-                        repair_id = repair_id_match.group(1).strip()
-                        # For business repair, the 'vehicle' is the business type
-                        repair_vehicle = "BUSINESS_REPAIR"
-                        repair_name = repair_name_match.group(1).strip()
-
-                        current_priority_index = priority_list.index(
-                            what_to_repair) if what_to_repair and what_to_repair in priority_list else -1
-                        new_priority_index = priority_list.index(
-                            repair_vehicle) if repair_vehicle in priority_list else -1
-
-                        if new_priority_index > current_priority_index:  # Higher index means lower priority, so we want lower new_priority_index
-                            print(f"MECHANIC - Found higher priority business task: {repair_vehicle} (Priority: {new_priority_index}) vs current {what_to_repair} (Priority: {current_priority_index})")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                        elif what_to_repair is None:
-                            print(f"MECHANIC - First business task found: {repair_vehicle}")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                except Exception as e:
-                    print(f"Error parsing business repair row: {e}. Skipping row.")
-
-    # --- Check Vehicle Repair ---
-    if 'id="fail"' in vehicle_repair or not vehicle_repair.strip():
-        print("MECHANIC - No vehicle repairs.")
-    else:
-        print("MECHANIC - Checking vehicle repairs.")
-        submit_buttons_count += 1
-        vehicle_repair_details = vehicle_repair.split("<tr>")
-        for this_repair_html in vehicle_repair_details:
-            if 'label for' in this_repair_html:
-                try:
-                    repair_id_match = re.search(r'id="([^"]+)"', this_repair_html)
-                    repair_vehicle_match = re.search(r'\d+">([^<]+)</', this_repair_html)
-                    repair_name_match = re.search(r'\d+">([^<]+)</', this_repair_html)
-
-                    if repair_id_match and repair_vehicle_match and repair_name_match:
-                        repair_id = repair_id_match.group(1).strip()
-                        repair_vehicle = re.sub('[^a-zA-Z]', "", repair_vehicle_match.group(1).strip())
-                        repair_name = repair_name_match.group(1).strip()
-
-                        if player_data['Character Name'] == repair_name:
-                            print(f"MECHANIC - Skipping your own vehicle repair: {repair_vehicle} for {repair_name}.")
-                            continue
-
-                        current_priority_index = priority_list.index(
-                            what_to_repair) if what_to_repair and what_to_repair in priority_list else -1
-                        new_priority_index = priority_list.index(
-                            repair_vehicle) if repair_vehicle in priority_list else -1
-
-                        if new_priority_index > current_priority_index:  # Higher index means lower priority, so we want lower new_priority_index
-                            print(f"MECHANIC - Found higher priority vehicle task: {repair_vehicle} (Priority: {new_priority_index}) vs current {what_to_repair} (Priority: {current_priority_index})")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                        elif what_to_repair is None:
-                            print(f"MECHANIC - First vehicle task found: {repair_vehicle}")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                except Exception as e:
-                    print(f"Error parsing vehicle repair row: {e}. Skipping row.")
-
-    # --- Check Vault Construction ---
-    if 'id="fail"' in vault_construction or not vault_construction.strip():
-        print("MECHANIC - No vault constructions.")
-    else:
-        print("MECHANIC - Checking vault constructions.")
-        submit_buttons_count += 1
-        vault_construction_details = vault_construction.split("<tr>")
-        for this_repair_html in vault_construction_details:
-            if 'label for' in this_repair_html:
-                try:
-                    repair_id_match = re.search(r'id="([^"]+)"', this_repair_html)
-                    repair_vehicle_match = re.search(r'\d+">([^<]+)</', this_repair_html)
-                    repair_name_match = re.search(r'\d+">([^<]+)</', this_repair_html)
-
-                    if repair_id_match and repair_vehicle_match and repair_name_match:
-                        repair_id = repair_id_match.group(1).strip()
-                        repair_vehicle = "VAULT"  # Fixed type for vault
-                        repair_name = repair_name_match.group(1).strip()
-
-                        current_priority_index = priority_list.index(
-                            what_to_repair) if what_to_repair and what_to_repair in priority_list else -1
-                        new_priority_index = priority_list.index(
-                            repair_vehicle) if repair_vehicle in priority_list else -1
-
-                        if new_priority_index > current_priority_index:  # Higher index means lower priority, so we want lower new_priority_index
-                            print(f"MECHANIC - Found higher priority vault task: {repair_vehicle} (Priority: {new_priority_index}) vs current {what_to_repair} (Priority: {current_priority_index})")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                        elif what_to_repair is None:
-                            print(f"MECHANIC - First vault task found: {repair_vehicle}")
-                            id_to_repair = repair_id
-                            what_to_repair = repair_vehicle
-                            which_submit_button_index = submit_buttons_count
-                except Exception as e:
-                    print(f"Error parsing vault construction row: {e}. Skipping row.")
-
-    if id_to_repair:
-        print(f"MECHANIC - Selected task: {what_to_repair} (ID: {id_to_repair})")
-        # Click the radio button for the selected task
-        if not _find_and_click(By.XPATH, f".//*[@id='{id_to_repair}']"):
-            print(f"FAILED: Could not click radio button for {id_to_repair}. Setting short cooldown.")
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
-            return False
-
-        # Click the correct submit button based on how many forms are on the page
-        submit_button_xpath = f".//*[@id='holder_content']/form[{which_submit_button_index}]/p/input[@class='submit']"
-        if not _find_and_click(By.XPATH, submit_button_xpath, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
-            print(f"FAILED: Could not click submit button for {what_to_repair}. Setting short cooldown.")
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
-            return False
-
-        print(f"Successfully performed engineering task: {what_to_repair}.")
-        return True
-    else:
-        print("No engineering tasks found to repair/construct. Setting random cooldown.")
-        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(40, 49))  # 40 to 49 seconds if nothing to do
+    # If id prefer the last available radio button instead of first available, change radios[0] to radios[-1]; Should we wish to prioritise cars.
+    radio = radios[-1]
+    try:
+        radio.click()
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+    except Exception as e:
+        print(f"FAILED: Could not click the first radio: {e}")
+        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
         return False
 
-def execute_judge_casework_logic(player_data):
+    # Submit the nearest form for that radio (its ancestor form)
+    try:
+        form = radio.find_element(By.XPATH, "./ancestor::form[1]")
+        submit = form.find_element(By.XPATH, ".//input[@type='submit' or @class='submit']")
+        submit.click()
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
+        print("Successfully started the first available engineering task.")
+        return True
+    except Exception as e:
+        print(f"FAILED: Could not submit the selected task: {e}")
+        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
+        return False
+
+def judge_casework(player_data):
     """Manages and processes judge cases."""
     print("\n--- Beginning Judge Casework Operation ---")
 
@@ -644,7 +455,7 @@ def execute_judge_casework_logic(player_data):
             ):
                 continue
 
-            if _process_judge_case_verdict(crime_committed, player_data['Character Name']):
+            if process_judge_case_verdict(crime_committed, player_data['Character Name']):
                 print(f"Successfully processed a case for {suspect_name}.")
                 processed_any_case = True
                 return True
@@ -665,7 +476,7 @@ def execute_judge_casework_logic(player_data):
     return False
 
 
-def _process_judge_case_verdict(crime_committed, character_name):
+def process_judge_case_verdict(crime_committed, character_name):
     """Applies fine, sets no community service/jail time, and submits verdict."""
     fine_amount = global_vars.config.getint('Judge', crime_committed, fallback=1000)
     if fine_amount == 1000:
@@ -704,7 +515,7 @@ def _process_judge_case_verdict(crime_committed, character_name):
         return False
     return True
 
-def execute_lawyer_casework_logic():
+def lawyer_casework():
     """
     Manages and processes lawyer cases.
     Only works if occupation is 'Lawyer'.
@@ -767,7 +578,7 @@ def execute_lawyer_casework_logic():
             except Exception as e:
                 print(f"ERROR: Error processing a lawyer case row: {e}. Attempting to return to court page.")
                 try:
-                    global_vars.driver.get("https://mafiamatrix.com/court/court.asp")
+                    global_vars.driver.get("https://mafiamatrix.net/court/court.asp")
                     time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
                 except Exception as back_e:
                     print(f"ERROR: Failed to navigate back to court page after error: {back_e}")
@@ -785,7 +596,7 @@ def execute_lawyer_casework_logic():
 
     return processed_any_case
 
-def execute_banker_laundering():
+def banker_laundering():
     """
     Manages and performs money laundering services as a banker for other players.
     This function assumes the bot is playing as a Banker and is accepting
@@ -801,7 +612,7 @@ def execute_banker_laundering():
 
     # Navigate to the Banker Laundering page in the bank menu
     try:
-        laundering_url = "https://mafiamatrix.com/income/banklaunder.asp"
+        laundering_url = "https://mafiamatrix.net/income/banklaunder.asp"
         global_vars.driver.get(laundering_url)
         time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
         print(f"Successfully navigated directly to: {laundering_url}")
@@ -967,7 +778,7 @@ def execute_banker_laundering():
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-def execute_banker_add_clients(initial_player_data):
+def banker_add_clients(initial_player_data):
     """
     Manages the process of adding new clients as a Banker.
     Reads aggravated_crime_cooldowns.json to find potential clients
@@ -1034,7 +845,7 @@ def execute_banker_add_clients(initial_player_data):
 
     # Navigate to the Banker page
     try:
-        global_vars.driver.get("https://mafiamatrix.com/income/banklaunder.asp")
+        global_vars.driver.get("https://mafiamatrix.net/income/banklaunder.asp")
         time.sleep(global_vars.ACTION_PAUSE_SECONDS)  # Let the page load
     except Exception as e:
         print(f"ERROR: Could not load Banker page: {e}")
@@ -1116,7 +927,6 @@ def execute_banker_add_clients(initial_player_data):
         global_vars._script_bank_add_clients_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(hours=random.uniform(7, 9))
         return False
 
-
 def get_existing_banker_clients():
     """
     Scrapes the gangster names the banker already does business with
@@ -1154,7 +964,7 @@ def get_existing_banker_clients():
         print(f"ERROR: Could not fetch existing banker clients: {e}")
         return []
 
-def execute_fire_work_logic(initial_player_data):
+def fire_casework(initial_player_data):
     """
     Executes firefighting logic (Attend Fires and Fire Safety Inspections)
     Uses case_time_remaining to throttle operations
@@ -1210,7 +1020,7 @@ def execute_fire_work_logic(initial_player_data):
     global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
     return False
 
-def execute_fire_duties_logic():
+def fire_duties():
     """
     Navigates to firefighter Duties, selects the last available duty, and trains.
     """

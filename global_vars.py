@@ -82,6 +82,9 @@ POLICE_911_CACHE_FILE = os.path.join(COOLDOWN_DATA_DIR, "police_911_cache.json")
 PENDING_FORENSICS_FILE = os.path.join(COOLDOWN_DATA_DIR, "pending_forensics.json")
 FORENSICS_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "forensics_training_done.json")
 POLICE_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "police_training_done.json")
+COMBAT_TRAINING_DONE = os.path.join(COOLDOWN_DATA_DIR, "combat_training_completed.json")
+CUSTOMS_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "customs_training_done.json")
+FIRE_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "fire_training_done.json")
 
 # Define keys for database (aggravated_crime_cooldowns.json) entries
 MINOR_CRIME_COOLDOWN_KEY = 'minor_crime_cooldown'

@@ -4,7 +4,7 @@ import datetime
 from global_vars import COOLDOWN_DATA_DIR, COOLDOWN_FILE, AGGRAVATED_CRIMES_LOG_FILE, FUNERAL_PARLOUR_LAST_SCAN_FILE, \
     YELLOW_PAGES_LAST_SCAN_FILE, PLAYER_HOME_CITY_KEY, ALL_DEGREES_FILE, WEAPON_SHOP_NEXT_CHECK_FILE, \
     POLICE_911_NEXT_POST_FILE, POLICE_911_CACHE_FILE, PENDING_FORENSICS_FILE, FORENSICS_TRAINING_DONE_FILE, \
-    POLICE_TRAINING_DONE_FILE
+    POLICE_TRAINING_DONE_FILE, COMBAT_TRAINING_DONE, CUSTOMS_TRAINING_DONE_FILE, FIRE_TRAINING_DONE_FILE
 
 
 def init_local_db():
@@ -24,6 +24,9 @@ def init_local_db():
             PENDING_FORENSICS_FILE: lambda f: json.dump([], f),
             FORENSICS_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
             POLICE_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
+            COMBAT_TRAINING_DONE: lambda f: json.dump(False, f),
+            CUSTOMS_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
+            FIRE_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
         }
 
         for file_path, init_func in files_to_initialize.items():

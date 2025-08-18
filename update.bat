@@ -12,27 +12,12 @@ echo.
 
 :: Step 1: Check if Git is installed
 where git >nul 2>&1
-if %errorlevel%==0 (
-    echo Git is already installed.
-) else (
-    echo Git not found. Installing Git...
-
-    set "gitInstaller=Git-Installer.exe"
-    set "gitUrl=https://github.com/git-for-windows/git/releases/latest/download/Git-2.45.1-64-bit.exe"
-
-    powershell -Command "Invoke-WebRequest -Uri \"%gitUrl%\" -OutFile \"%gitInstaller%\"" >nul 2>&1
-
-    if not exist "%gitInstaller%" (
-        echo Failed to download Git installer. Aborting.
-        pause
-        exit /b
-    )
-
-    "%gitInstaller%" /VERYSILENT /NORESTART /SUPPRESSMSGBOXES
-    set "PATH=%ProgramFiles%\Git\cmd;%PATH%"
-    del "%gitInstaller%"
-
-    echo Git installed successfully.
+if %errorlevel% neq 0 (
+    echo ERROR: Git for Windows is not installed on this system.
+    echo Please download and install it from:
+    echo https://github.com/git-for-windows/git/releases
+    pause
+    exit /b
 )
 
 :: Step 2: Confirm this folder is a Git repo or clone fresh
