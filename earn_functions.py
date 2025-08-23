@@ -76,6 +76,7 @@ def execute_earns_logic():
         "Funeral": ['Funeral Director', 'Undertaker', 'Mortician',  'Mortician Assistant'],
         "Police": ['Assign Duties', 'Arrest Criminals', 'Do paper work', 'Patrol'],
         "Mayor": ['Mayoral Duties'],
+        "Customs": ['Airport security', 'Paperwork', 'Search luggage', 'Stamp passports'],
     }
 
     final_earn_to_click = which_earn

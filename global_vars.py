@@ -85,6 +85,7 @@ POLICE_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "police_training_don
 COMBAT_TRAINING_DONE = os.path.join(COOLDOWN_DATA_DIR, "combat_training_completed.json")
 CUSTOMS_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "customs_training_done.json")
 FIRE_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "fire_training_done.json")
+BLIND_EYE_QUEUE_FILE = os.path.join(COOLDOWN_DATA_DIR, "blind_eye_queue.json")
 
 # Define keys for database (aggravated_crime_cooldowns.json) entries
 MINOR_CRIME_COOLDOWN_KEY = 'minor_crime_cooldown'
@@ -97,6 +98,7 @@ _script_earn_cooldown_end_time = datetime.datetime.now()
 _script_action_cooldown_end_time = datetime.datetime.now()
 _script_launder_cooldown_end_time = datetime.datetime.now()
 _script_case_cooldown_end_time = datetime.datetime.now()
+_script_trafficking_cooldown_end_time = datetime.datetime.now()
 _script_event_cooldown_end_time = datetime.datetime.now()
 # Career-specific timers
 _script_bank_add_clients_cooldown_end_time = datetime.datetime.now()

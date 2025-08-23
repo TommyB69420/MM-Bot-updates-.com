@@ -8,7 +8,9 @@ from selenium.webdriver.support.select import Select
 
 import global_vars
 from database_functions import _read_json_file, remove_player_cooldown, set_player_data
-from helper_functions import _find_and_send_keys, _find_and_click, _find_element, _navigate_to_page_via_menu, _get_element_text, _get_element_attribute, _find_elements
+from helper_functions import _find_and_send_keys, _find_and_click, _find_element, _navigate_to_page_via_menu, \
+    _get_element_text, _get_element_attribute, _find_elements, _get_current_url, blind_eye_queue_count, \
+    _get_dropdown_options, _select_dropdown_option, dequeue_blind_eye
 from timer_functions import get_game_timer_remaining, get_all_active_game_timers
 
 
@@ -599,221 +601,195 @@ def lawyer_casework():
 def banker_laundering():
     """
     Manages and performs money laundering services as a banker for other players.
-    This function assumes the bot is playing as a Banker and is accepting
-    laundering requests from other players.
+    Assumes the bot is playing as a Banker and is accepting laundering requests.
+    Returns True on successful process, False otherwise.
     """
     print("\n--- Beginning Banker Laundering Service Operation ---")
 
-    # Check if the function is still on cooldown
-    if datetime.datetime.now() < getattr(global_vars, '_script_case_cooldown_end_time', datetime.datetime.min):
-        remaining_time = (getattr(global_vars, '_script_case_cooldown_end_time') - datetime.datetime.now()).total_seconds()
-        print(f"Banker Laundering Service is on cooldown. Remaining: {int(remaining_time)} seconds.")
-        return False
-
-    # Navigate to the Banker Laundering page in the bank menu
-    try:
-        laundering_url = "https://mafiamatrix.net/income/banklaunder.asp"
-        global_vars.driver.get(laundering_url)
-        time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
-        print(f"Successfully navigated directly to: {laundering_url}")
-    except Exception as e:
-        print(f"FAILED: Could not load banker laundering page: {e}")
-        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
-        return False
+    # --- Navigate (skip if already there) ---
+    curr_url = (_get_current_url() or "").lower()
+    if "banklaunder.asp" not in curr_url:
+        if not _navigate_to_page_via_menu(
+            "//span[@class='income']",
+            "//a[normalize-space()='Convert Dirty Money']",
+            "Banker Page"):
+            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+    else:
+        print("Already on Banker page, skipping navigation.")
 
     print("Successfully navigated to Banker Laundering Service page. Checking for requests...")
 
-    # Locate the laundering requests table on the page
-    requests_table_xpath = "//div[@id='holder_content']/table"
-    requests_table = _find_element(By.XPATH, requests_table_xpath)
-
+    # --- Find table ---
+    requests_table = _find_element(By.XPATH, "//div[@id='holder_content']/table")
     if not requests_table:
         print("No banker laundering requests table found.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
         return False
 
-    # Extract all request rows from the table (excluding the header)
-    request_rows = requests_table.find_elements(By.TAG_NAME, "tr")[1:]
-    if not request_rows:
+    # --- Rows (skip header) ---
+    rows = requests_table.find_elements(By.TAG_NAME, "tr")[1:]
+    if not rows:
         print("No pending laundering requests from other players.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
         return False
 
-    # Filter requests to only include those with a balance of $5 or more
-    eligible_requests = []
-    for row in request_rows:
+    # --- Filter eligible (>= $5) ---
+    eligible_rows = []
+    small_count = 0
+
+    for row in rows:
         try:
-            client_name_element = row.find_element(By.XPATH, ".//td[1]")
-            client_name = client_name_element.text.strip()
+            client_cell = row.find_element(By.XPATH, ".//td[1]")
+            amount_cell = row.find_element(By.XPATH, ".//td[3]")
 
-            # XPath to target the correct column for the amount (td[3])
-            amount_text_element = row.find_element(By.XPATH, ".//td[3]")
-            amount_text = amount_text_element.text.strip()
+            client_name = (client_cell.text or "").strip()
+            amount_text = (amount_cell.text or "").strip()
 
-            # Remove dollar sign, commas, and convert to int
-            cleaned_amount_string = amount_text.replace('$', '').replace(',', '').strip()
-            amount = 0
+            cleaned = amount_text.replace("$", "").replace(",", "").strip()
             try:
-                amount = int(cleaned_amount_string)
+                amount = int(cleaned)
             except ValueError:
-                # Log a specific warning if the cleaned string still can't be converted to int
-                print(f"WARNING: Could not parse amount '{amount_text}' for request from {client_name}. Skipping this request.")
-                continue  # Skip to the next row if amount is unparseable
+                print(f"WARNING: Could not parse amount '{amount_text}' for request from {client_name or '(unknown)'}; skipping.")
+                continue
 
-            if amount >= 5:  # Check if amount is $5 or more
-                eligible_requests.append(row)
+            if amount >= 5:
+                eligible_rows.append(row)
             else:
-                print(f"Skipping request from {client_name} with amount ${amount} (less than $5).") # Super spammy, do I want this?
+                small_count += 1
 
         except NoSuchElementException:
-            print("ERROR: Could not find client name or amount element in a laundering request row. Skipping row.")
-            continue
+            print("ERROR: Missing client or amount column in a request row; skipping row.")
         except Exception as e:
-            print(f"An unexpected error occurred while parsing a laundering request row: {e}. Skipping row.")
-            continue
+            print(f"ERROR: Unexpected error parsing a request row: {e}; skipping row.")
 
-    if not eligible_requests:
-        print("No eligible laundering requests found (all less than $5 or unparseable).")
+    if not eligible_rows:
+        msg = "All laundering requests are less than $5." if small_count else "No eligible requests found."
+        print(f"{msg} (sub-$5 count: {small_count})")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
         return False
+    if small_count:
+        print(f"Info: filtered out {small_count} sub-$5 request(s).")
 
-    # Select the first eligible laundering request to process
-    selected_request_row = eligible_requests[0] # Changed from random.choice(eligible_requests)
-
+    # --- Take first eligible ---
+    selected = eligible_rows[0]
     try:
-        # Get the player's name element and its link *from the selected row*
-        client_name_link_element = selected_request_row.find_element(By.XPATH, ".//td[1]/a")
-        client_name = client_name_link_element.text.strip()
-
-        # Get the amount text from the correct column (td[3]) *from the selected row*
-        amount_text_element = selected_request_row.find_element(By.XPATH, ".//td[3]")
-        amount_text = amount_text_element.text.strip()
-
-        # Re-parse the amount for the selected launder
-        cleaned_amount_string = amount_text.replace('$', '').replace(',', '').strip()
-        amount_to_process = 0
+        # Name (link preferred)
+        link_el = None
         try:
-            amount_to_process = int(cleaned_amount_string)
-            print(f"Selected request from {client_name} for ${amount_to_process}.")
+            link_el = selected.find_element(By.XPATH, ".//td[1]/a")
+            client_name = (link_el.text or "").strip()
+        except NoSuchElementException:
+            client_name = (selected.find_element(By.XPATH, ".//td[1]").text or "").strip()
+
+        amount_text = (selected.find_element(By.XPATH, ".//td[3]").text or "").strip()
+        cleaned = amount_text.replace("$", "").replace(",", "").strip()
+        try:
+            amount_to_process = int(cleaned)
         except ValueError:
-            print(f"WARNING: Could not parse amount '{amount_text}' for selected request from {client_name}. Skipping this request.")
+            print(f"WARNING: Could not parse amount '{amount_text}' for selected request from {client_name or '(unknown)'}; backing off.")
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(60, 120))
             return False
 
-        # --- STEP 1: Click on the player's name link ---
-        # Directly click the element found within the selected row
-        try:
-            client_name_link_element.click()
-            time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2) # Wait for navigation
-        except Exception as e:
-            print(f"FAILED: Could not click player name link for request from {client_name}: {e}.")
+        print(f"Selected request from {client_name} for ${amount_to_process}.")
+
+        # Click name (if link) — guard pattern to avoid “unreachable” diagnostics
+        clicked_ok = False
+        if link_el:
+            try:
+                link_el.click()
+                time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
+                print(f"Successfully clicked player name '{client_name}'. Now on the transaction page.")
+                clicked_ok = True
+            except Exception as e:
+                print(f"FAILED: Could not click player link for {client_name}: {e}")
+        else:
+            print("FAILED: Client name is not a link; cannot open transaction page.")
+
+        if not clicked_ok:
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
             return False
 
-        print(f"Successfully clicked player name '{client_name}'. Now on the transaction page.")
-
-        # --- STEP 2: Select "Launder Money" from the dropdown ---
-        # XPath for the dropdown
-        dropdown_xpath = "//select[@name='display']"
-        dropdown_element = _find_element(By.XPATH, dropdown_xpath)
-
-        if not dropdown_element:
-            print("FAILED: Could not find 'What do you wish to do?' dropdown.")
+        # Pick "Launder Money" in dropdown
+        dropdown_el = _find_element(By.XPATH, "//select[@name='display']")
+        if not dropdown_el:
+            print("FAILED: Could not find the 'What do you wish to do?' dropdown.")
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
             return False
 
         try:
-            select = Select(dropdown_element)
-            select.select_by_value("result")
-            time.sleep(global_vars.ACTION_PAUSE_SECONDS)  # Short pause after selection
-            print("Selected 'Launder Money' from the dropdown.")
+            Select(dropdown_el).select_by_value("result")
+            time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+            print("Selected 'Launder Money'.")
         except NoSuchElementException:
-            print("FAILED: 'Launder Money' option not found in dropdown.")
+            print("FAILED: 'Launder Money' option not present in dropdown.")
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
             return False
-        except Exception as select_e:
-            print(f"FAILED: Error selecting 'Launder Money' from dropdown: {select_e}.")
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
-            return False
-
-        # --- STEP 3: Click the "Submit" button on the transaction page ---
-        submit_button_xpath = "//input[@type='submit' and @value='Submit' and @name='B1']"
-        if not _find_and_click(By.XPATH, submit_button_xpath, timeout=global_vars.EXPLICIT_WAIT_SECONDS, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
-            print("FAILED: Could not click 'Submit' button after selecting 'Launder Money'.")
+        except Exception as e:
+            print(f"FAILED: Error selecting dropdown value: {e}")
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
             return False
 
-        print("Successfully clicked 'Submit'. Now on the Auto Funds Transfer page.")
+        # Auto Funds Transfer
+        if not _find_and_click(By.XPATH, "//input[@name='B1']", timeout=global_vars.EXPLICIT_WAIT_SECONDS, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+            print("FAILED: Could not click first 'Submit' button after selecting 'Launder Money'.")
+            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
 
-        # --- STEP 4: Click "Auto Funds Transfer" button on the next page ---
-        auto_funds_transfer_button_xpath = "//input[@type='submit' and @value='Auto Funds Transfer' and @name='B1']"
-        if not _find_and_click(By.XPATH, auto_funds_transfer_button_xpath, timeout=global_vars.EXPLICIT_WAIT_SECONDS, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+        print("Submitted transaction type. Proceeding to Auto Funds Transfer…")
+
+        if not _find_and_click(By.XPATH, "//input[@name='B1']", timeout=global_vars.EXPLICIT_WAIT_SECONDS, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
             print("FAILED: Could not click 'Auto Funds Transfer' button.")
             global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
             return False
 
-        print(f"Successfully completed laundering and auto-transferred funds for {client_name} (${amount_to_process}).")
-
-        # --- Read the actual game timer for case_time_remaining ---
-        all_timers = get_all_active_game_timers()
-        case_time_remaining = all_timers.get('case_time_remaining', 0)
-
-        if case_time_remaining > 0:
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=case_time_remaining)
-            print(f"Next Banker Laundering check based on game timer: {global_vars._script_case_cooldown_end_time.strftime('%H:%M:%S')}.")
-        else:
-            # Fallback to 5-10 minutes if game timer cannot be read or is 0
-            fallback_cooldown = random.uniform(300, 600)  # 5 to 10 minutes
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=fallback_cooldown)
-            print(f"Could not read case_time_remaining. Setting fallback cooldown of {int(fallback_cooldown)} seconds.")
+        print(f"SUCCESS: Completed laundering and auto-transferred funds for {client_name} (${amount_to_process}).")
         return True
 
-    # Handle expected and unexpected errors during request processing
     except NoSuchElementException:
-        print("ERROR: Could not find elements in the selected laundering request row or subsequent pages. Skipping.")
+        print("ERROR: Missing elements while processing the selected request. Backing off shortly.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
     except Exception as e:
-        print(f"An unexpected error occurred while processing a laundering request: {e}. Setting short cooldown.")
+        print(f"ERROR: Unexpected exception during laundering flow: {e}. Short cooldown set.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-def banker_add_clients(initial_player_data):
+def banker_add_clients(current_player_home_city=None):
     """
     Manages the process of adding new clients as a Banker.
     Reads aggravated_crime_cooldowns.json to find potential clients
     (players with a home city different from the bot's home city).
+    Accepts either the full initial_player_data dict or just the Home City string.
     """
     print("\n--- Beginning Banker Add Clients Operation ---")
 
-    # Cooldown check for this specific add clients service
-    if datetime.datetime.now() < getattr(global_vars, '_script_bank_add_clients_cooldown_end_time', datetime.datetime.min):
-        remaining_time = (getattr(global_vars, '_script_bank_add_clients_cooldown_end_time') - datetime.datetime.now()).total_seconds()
-        print(f"Banker Add Clients is on cooldown. Remaining: {int(remaining_time)} seconds.")
-        return False
-
-    current_player_home_city = initial_player_data.get("Home City")
-    if not current_player_home_city:
+    # Normalise current_player_home_city (support dict or str)
+    if isinstance(current_player_home_city, dict):
+        current_player_home_city = current_player_home_city.get("Home City")
+    if not isinstance(current_player_home_city, str) or not current_player_home_city.strip():
         print("ERROR: Could not determine current player's home city. Cannot filter clients.")
         global_vars._script_bank_add_clients_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
-
-    print(f"Current player's home city: {current_player_home_city}")
+    current_player_home_city = current_player_home_city.strip()
 
     # Read the aggravated_crime_cooldowns.json file
     cooldowns_data = _read_json_file(global_vars.COOLDOWN_FILE)
     potential_clients = []
 
     # Identify players with a home city that is NOT the bot's home city
-    for player_id, player_data_from_db in cooldowns_data.items():
+    for player_id, player_data_from_db in (cooldowns_data or {}).items():
         db_player_home_city = player_data_from_db.get(global_vars.PLAYER_HOME_CITY_KEY)
-        if not db_player_home_city:
+        if not isinstance(db_player_home_city, str) or not db_player_home_city.strip():
             continue
 
-        # Exclude players from the same home city or from 'Hell'
-        if db_player_home_city.lower() == current_player_home_city.lower():
+        city = db_player_home_city.strip()
+        # Exclude players from the same home city or from 'Hell'/'Heaven'
+        lc = city.lower()
+        if lc == current_player_home_city.lower():
             continue
-        if db_player_home_city.lower() in ["hell", "heaven"]:
+        if lc in {"hell", "heaven"}:
             continue
 
         # Passed all filters — add to potential clients
@@ -826,14 +802,25 @@ def banker_add_clients(initial_player_data):
 
     print(f"Found {len(potential_clients)} potential clients to add: {potential_clients}")
 
+    # Ensure we're on the Banker page *before* scraping existing clients
+    curr_url = (_get_current_url() or "").lower()
+    if "banklaunder.asp" not in curr_url:
+        if not _navigate_to_page_via_menu(
+            "//span[@class='income']",
+            "//a[normalize-space()='Convert Dirty Money']",
+            "Banker Page"):
+            global_vars._script_bank_add_clients_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+    else:
+        print("Already on Banker page, skipping navigation.")
+
+    # Now it is safe to scrape who we already do business with
     existing_clients = get_existing_banker_clients()
+    existing_lower = {ec.lower() for ec in existing_clients}
 
-    # Case-insensitive filtering, just in case
-    potential_clients = [
-        client for client in potential_clients
-        if client.lower() not in [ec.lower() for ec in existing_clients]
-    ]
-
+    # Case-insensitive filtering
+    potential_clients = [c for c in potential_clients if c.lower() not in existing_lower]
     print(f"Filtered potential clients (excluding existing): {potential_clients}")
 
     if not potential_clients:
@@ -842,15 +829,6 @@ def banker_add_clients(initial_player_data):
         return False
 
     added_any_client = False
-
-    # Navigate to the Banker page
-    try:
-        global_vars.driver.get("https://mafiamatrix.net/income/banklaunder.asp")
-        time.sleep(global_vars.ACTION_PAUSE_SECONDS)  # Let the page load
-    except Exception as e:
-        print(f"ERROR: Could not load Banker page: {e}")
-        global_vars._script_bank_add_clients_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
-        return False
 
     # Navigate to the 'Establish New Deal' tab
     add_client_tab_xpath = "//a[text()='Establish New Deal']"
@@ -872,7 +850,6 @@ def banker_add_clients(initial_player_data):
         print(f"\n--- Attempting to add client: {client_to_add} ---")
 
         # Always navigate to 'Establish New Deal' tab before each client attempt
-        add_client_tab_xpath = "//a[text()='Establish New Deal']"
         add_client_link = _find_element(By.XPATH, add_client_tab_xpath)
         if not add_client_link:
             print("FAILED: Could not find 'Establish New Deal' link before adding next client.")
@@ -896,16 +873,18 @@ def banker_add_clients(initial_player_data):
                 print(f"FAILED: Could not click submit button for client '{client_to_add}'. Skipping.")
                 continue
 
-            fail_element = _find_element(By.ID, "fail", timeout=2, suppress_logging=True)
+            fail_element = _find_element(By.ID, "fail", timeout=1, suppress_logging=True)
             if fail_element:
-                fail_results = _get_element_attribute(By.ID, "fail", "innerHTML")
-                if 'appear to exist' in fail_results:
+                fail_results = _get_element_attribute(By.ID, "fail", "innerHTML") or ""
+                fl = fail_results.lower()
+                if 'appear to exist' in fl:
                     print(f"INFO: Client '{client_to_add}' does not appear to exist (dead/removed). Removing from database.")
                     remove_player_cooldown(client_to_add)
-                elif 'from your home city' in fail_results:
+                elif 'from your home city' in fl:
                     print(f"INFO: Client '{client_to_add}' is from your home city.")
+                    # ensure we persist a string
                     set_player_data(client_to_add, home_city=current_player_home_city)
-                elif 'already do business' in fail_results:
+                elif 'already do business' in fl:
                     print(f"INFO: You already do business with '{client_to_add}'. Skipping.")
                 else:
                     print(f"WARNING: Unknown failure when adding client '{client_to_add}': {fail_results}")
@@ -918,12 +897,10 @@ def banker_add_clients(initial_player_data):
 
     if added_any_client:
         print("Completed Banker Add Clients operation. Some clients were added.")
-        # Set a short cooldown as the action was performed
         global_vars._script_bank_add_clients_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(hours=random.uniform(7, 9))
         return True
     else:
         print("No new clients were successfully added in this cycle.")
-        # Set a longer cooldown if no clients were added or errors occurred
         global_vars._script_bank_add_clients_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(hours=random.uniform(7, 9))
         return False
 
@@ -931,31 +908,42 @@ def get_existing_banker_clients():
     """
     Scrapes the gangster names the banker already does business with
     from the Laundering Deals table under the 'Gangster' column.
-    Ensures it is on the 'Deals' tab first before scraping.
+    Ensures we're on the Banker page and the 'Deals' tab first.
     """
     try:
-        # Navigate to the "Deals" tab to ensure the client list is loaded
-        deals_tab_xpath = ".//*[@id='content']/div[@id='account_holder']/div[@id='account_nav']/ul/li[1]/a"
-        _find_and_click(By.XPATH, deals_tab_xpath, pause=global_vars.ACTION_PAUSE_SECONDS)
-        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+        # Ensure we're on the Banker page
+        curr_url = (_get_current_url() or "").lower()
+        if "banklaunder.asp" not in curr_url:
+            if not _navigate_to_page_via_menu(
+                "//span[@class='income']",
+                "//a[normalize-space()='Convert Dirty Money']",
+                "Banker Page"):
+                print("FAILED: Could not navigate to Banker page before scraping existing clients.")
+                return []
+            time.sleep(global_vars.ACTION_PAUSE_SECONDS)
 
-        # Grab the HTML content of the clients list
-        clients_list_html = global_vars.driver.find_element(
-            By.XPATH, ".//*[@id='account_profile']/div[@id='holder_content']").get_attribute("innerHTML")
+        # Find all rows that have a gangster link (href contains 'display=gangster')
+        rows = _find_elements(By.XPATH, "//div[@id='holder_content']//table//tr[.//a[contains(@href,'display=gangster')]]", timeout=2)
 
-        existing_clients = []
-        if 'no deals' in clients_list_html.lower():
-            print("No existing banker clients found.")
+        if not rows:
+            # Check for 'no deals' message
+            holder = _find_element(By.XPATH, "//div[@id='holder_content']", timeout=1, suppress_logging=True)
+            holder_html = (holder.get_attribute("innerHTML") if holder else "") or ""
+            if "no deals" in holder_html.lower():
+                print("No existing banker clients found.")
+                return []
+            print("No rows with gangster links found on Deals tab.")
             return []
 
-        # Parse HTML rows for client names
-        for row in clients_list_html.split("<tr>"):
-            if 'display=gangster' in row:
-                match = re.search(r'\d+">(.+?)<', row)
-                if match:
-                    client_name = match.group(1).strip()
-                    if client_name:
-                        existing_clients.append(client_name)
+        existing_clients = []
+        for r in rows:
+            try:
+                a = r.find_element(By.XPATH, ".//a[contains(@href,'display=gangster')]")
+                name = (a.text or "").strip()
+                if name:
+                    existing_clients.append(name)
+            except Exception:
+                continue
 
         print(f"Existing banker clients found: {existing_clients}")
         return existing_clients
@@ -1063,3 +1051,64 @@ def fire_duties():
         print("Train button not found.")
         return False
 
+
+def customs_blind_eyes():
+    """
+    Executes ONE 'Turn a Blind Eye' if anything is queued and returns True on success.
+    Assumes the *caller* only invokes this when the Trafficking/AgCrime timer is ready (<= 0).
+    """
+    if blind_eye_queue_count() <= 0:
+        return False
+
+    # Navigate to the aggravated crime menu
+    if not _navigate_to_page_via_menu(
+        "//span[@class='income']",
+        "//a[@href='/income/agcrime.asp'][normalize-space()='Aggravated Crimes']",
+        "Aggravated Crimes"):
+        print("FAILED: navigate to Aggravated Crimes")
+        return False
+
+    # Select radio value 'blindeye', then submit
+    if not _find_and_click(By.XPATH, "//input[@type='radio' and @name='agcrime' and @value='blindeye']"):
+        print("FAILED: blindeye radio not found")
+        return False
+
+    if not _find_and_click(By.XPATH, "//input[@name='B1']"):
+        print("FAILED: Commit Crime button not found/clickable")
+        return False
+
+    # On blindeye.asp, pick a player in the dropdown and click 'Turn a Blind Eye'. Try a specific form first, then a general fallback
+    select_xpath = "//form[@action='blindeye.asp']//select | //div[@id='holder_content']//form//select"
+    options = _get_dropdown_options(By.XPATH, select_xpath) or []
+
+    # Build list of valid, non-placeholder entries
+    valid = []
+    for opt in options:
+        t = (opt or "").strip()
+        low = t.lower()
+        if not t or low.startswith(("select", "choose", "—", "-", "please")):
+            continue
+        valid.append(t)
+
+    # If there are no valid blind eye requests, set a short retry cooldown and bail
+    if not valid:
+        print("No valid Blind Eye targets available. Setting short retry cooldown.")
+        global_vars._script_trafficking_cooldown_end_time = (datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(60, 120)))
+        return False
+
+    choice = valid[0]
+
+    # Finally, submit: usually name='B1' or value text containing 'Turn a Blind Eye'
+    if not _find_and_click(
+        By.XPATH, "//input[@type='submit' and (@name='B1' or contains(@value,'Turn a Blind Eye'))]"):
+        print("FAILED: 'Turn a Blind Eye' submit not found/clickable")
+        return False
+
+    # if blind eye is success, consume 1 success token from the JSON file.
+    if dequeue_blind_eye():
+        remaining = blind_eye_queue_count()
+        print(f"Turned a Blind Eye for '{choice}'. Remaining queued: {remaining}")
+    else:
+        print("WARNING: Action done but queue could not be decremented (file read/write issue?)")
+
+    return True

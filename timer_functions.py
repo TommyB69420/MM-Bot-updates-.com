@@ -59,6 +59,7 @@ def get_all_active_game_timers():
         'action_time_remaining': 0,
         'case_time_remaining': 0,
         'launder_time_remaining': 0,
+        'trafficking_time_remaining': 0,
         'event_time_remaining': 0,
 
         'bank_add_clients_time_remaining': 0,
@@ -85,6 +86,7 @@ def get_all_active_game_timers():
         'action_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Action')]/form/span[@class='donation_timer']",
         'case_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Case')]/form/span[@class='donation_timer']",
         'launder_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Launder')]/form/span[@class='donation_timer']",
+        'trafficking_time_remaining': "//div[@id='user_timers_holder']/div/form[@name='traffick']/span[@class='donation_timer']",
         'event_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Event action')]/form/span[@class='donation_timer']",
     }
 
@@ -172,8 +174,7 @@ def get_all_active_game_timers():
 
 
     # --- Phase 3: Integrate ALL Script-Managed Internal Cooldowns (using max()) ---
-    # This ensures that if the script sets a cooldown (e.g., because an action failed,
-    # or you're in the wrong city), that cooldown is respected, overriding any shorter or non-existent in-game timers.
+    # This ensures that if the script sets a cooldown (e.g., because an action failed, or you're in the wrong city), that cooldown is respected, overriding any shorter or non-existent in-game timers.
 
     # Medical Cooldown
     script_medical_remaining = (global_vars._script_case_cooldown_end_time - current_time).total_seconds()
@@ -244,6 +245,11 @@ def get_all_active_game_timers():
     script_firefighter_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()
     if script_firefighter_remaining > 0:
         timers['action_time_remaining'] = max(timers.get('action_time_remaining', 0), script_firefighter_remaining)
+
+    # Customs Blind Eye Cooldown
+    script_blind_eye_remaining = (global_vars._script_trafficking_cooldown_end_time - current_time).total_seconds()
+    if script_blind_eye_remaining > 0:
+        timers['trafficking_time_remaining'] = max(timers.get('trafficking_time_remaining', 0), script_blind_eye_remaining)
 
     # Launder Cooldown
     script_launder_remaining = (global_vars._script_launder_cooldown_end_time - current_time).total_seconds()

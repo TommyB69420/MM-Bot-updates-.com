@@ -463,11 +463,14 @@ def execute_aggravated_crime_logic(player_data):
             status, target_attempted, amount_stolen = _perform_hack_attempt(current_target_player, min_steal, max_steal, retried_no_money)
 
             if status == 'success':
-                if hack_repay:
-                    if global_vars.hacked_player_for_repay and global_vars.hacked_amount_for_repay:
+                if hack_repay and global_vars.hacked_player_for_repay and global_vars.hacked_amount_for_repay:
+                    if global_vars.hacked_player_for_repay in retried_no_money:
+                        print(f"Skipping repay to {global_vars.hacked_player_for_repay} because we primed with $1 for the retry (looks botty otherwise).")
+                    else:
                         _repay_player(global_vars.hacked_player_for_repay, global_vars.hacked_amount_for_repay)
                 print(f"{crime_type} successful! Exiting attempts for this cycle.")
                 break
+
             elif status in ['cooldown_target', 'not_online', 'no_money', 'non_existent_target', 'wrong_city']:
                 tried_players_in_cycle.add(target_attempted)
                 if not _open_aggravated_crime_page("Hack"):

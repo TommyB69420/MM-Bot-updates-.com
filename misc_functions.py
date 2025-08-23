@@ -71,6 +71,10 @@ def study_degrees():
         degrees_to_check = ["Business", "Science", "Engineering", "Medicine", "Law"]
         for degree in degrees_to_check:
             if degree in dropdown_options:
+                print(f"Starting a new degree ('{degree}') — withdrawing $10,000 first.")
+                if not withdraw_money(10000):
+                    print("FAILED: Could not withdraw $10,000 for new degree.")
+                    return False
                 if _select_dropdown_option(By.XPATH, ".//*[@id='study_holder']/div[@id='holder_content']/form/select", degree):
                     print(f"Selected '{degree}' degree.")
                     if _find_and_click(By.XPATH, "//form//input[@type='submit']", pause=global_vars.ACTION_PAUSE_SECONDS * 2):
@@ -594,6 +598,7 @@ def auto_buy_drug_store_item(item_name: str):
         print(f"[AutoBuy] Drug Store cooldown set until {global_vars._script_drug_store_cooldown_end_time}")
     else:
         print(f"[AutoBuy] WARNING: No success message found after purchasing {item_name}.")
+        global_vars._script_drug_store_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=30)
         send_discord_notification(f"Failed to purchase {item_name} from Drug Store. The item is gone, or insufficient funds.")
 
 def check_bionics_shop(initial_player_data):
@@ -849,7 +854,7 @@ def gym_training():
 def police_training():
     """
     Handles police training sign-up and progression.
-    Dynamically stops after completing the required number of training sessions (e.g. 15, 25, etc.).
+    Dynamically stops after completing the required number of training sessions (e.g. 15, 30, etc.).
     """
 
     # Skip if already marked complete in game_data
@@ -862,69 +867,58 @@ def police_training():
 
     print("\n--- Starting Police Training Operation ---")
 
-    # Navigate to Police Recruitment page
+    # Navigate to the Police Recruitment page
     if not _navigate_to_page_via_menu(
         "//span[@class='city']",
         "//a[@class='business police']",
-        "Police Recruitment"
-    ):
+        "Police Training"):
         return False
 
-    dropdown_xpath = "//select[@name='action']"
-    submit_button_xpath = "//input[@name='B1']"
     success_box_xpath = "//div[@id='success']"
 
-    # Check available options in dropdown
-    options = _get_dropdown_options(By.XPATH, dropdown_xpath)
-    if not options:
-        print("FAILED: Could not retrieve dropdown options.")
-        return False
+    # If the first-time option exists, click it; otherwise select "Yes" (continue)
+    accept_opt = _find_element(By.XPATH, "//option[@value='acceptpolice']", timeout=1, suppress_logging=True)
 
-    # Determine if beginning training, or subsequent training
-    if any("acceptpolice" in opt.lower() for opt in options):
-        option_to_select = "acceptpolice"
-        print("Step: Signing up for Police Training...")
-    elif any("yes" in opt.lower() for opt in options):
-        option_to_select = "Yes"
-        print("Step: Continuing Police Training...")
+    if accept_opt:
+        print("Step: Signing up for Police Training.")
+        if not _find_and_click(By.XPATH, "//option[@value='acceptpolice']"):
+            print("FAILED: Could not click 'Yes, I would like to join' option.")
+            return False
     else:
-        print("FAILED: No relevant training option found.")
-        return False
+        print("Step: Continuing Police Training (subsequent training).")
+        yes_option_xpath = "//select[@name='action']/option[@value='Yes']"
 
-    # Select the right drop down option
-    if not _select_dropdown_option(By.XPATH, dropdown_xpath, option_to_select, use_value=True):
-        print("FAILED: Could not select training option.")
-        return False
+        # Try to click "Yes", with one retry after focusing the dropdown
+        if not _find_and_click(By.XPATH, yes_option_xpath):
+            _find_and_click(By.XPATH, "//select[@name='action']")
+            if not _find_and_click(By.XPATH, yes_option_xpath):
+                print("FAILED: Could not select 'Yes' from dropdown.")
+                return False
 
-    #  Click Submit
-    if not _find_and_click(By.XPATH, submit_button_xpath):
+    # Submit the form
+    if not _find_and_click(By.XPATH, "//input[@name='B1']"):
         print("FAILED: Could not click Submit.")
         return False
 
     # Check training progress to determine how many trains left to do
-    if option_to_select == "Yes":
-        success_text = _get_element_text(By.XPATH, success_box_xpath)
-        if success_text:
-            print(f"Success Message: '{success_text}'")
-            match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
-            if match:
-                current = int(match.group(1))
-                total = int(match.group(2))
-                print(f"Training Progress: {current}/{total}")
-                if current >= total:
-                    print("Training complete. No further action required.")
-                    _write_json_file(global_vars.POLICE_TRAINING_DONE_FILE, True)
-                    return False
-            else:
-                print("WARNING: Could not parse training progress.")
+    success_text = _get_element_text(By.XPATH, success_box_xpath)
+    if success_text:
+        print(f"Success Message: '{success_text}'")
+        match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
+        if match:
+            current = int(match.group(1))
+            total = int(match.group(2))
+            print(f"Training Progress: {current}/{total}")
         else:
-            print("WARNING: Success message not found after submitting.")
-            # Final fallback: Check for completion paragraph
-            final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]")
-            if final_text and "your hard work in training has paid off" in final_text.lower():
-                _write_json_file(global_vars.POLICE_TRAINING_DONE_FILE, True)
-                print("FINAL SUCCESS: Training is now fully complete.")
-                return False
+            print("WARNING: Could not parse training progress.")
+    else:
+        print("No success box found — likely finished training.")
+        #Check for completion paragraph
+        final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]") or ""
+        if "your hard work" in final_text.lower():
+            _write_json_file(global_vars.POLICE_TRAINING_DONE_FILE, True)
+            print("FINAL SUCCESS: Police training is now fully complete.")
+            return False
 
     print("Police training step completed successfully.")
     return True
@@ -1093,69 +1087,58 @@ def fire_training():
 
     print("\n--- Starting Fire Training Operation ---")
 
-    # Navigate to Fire Service Recruitment page
+    # Navigate to Fire Recruitment page
     if not _navigate_to_page_via_menu(
         "//span[@class='city']",
-        "//a[@class='business fire']",
-        "Fire Service"
-    ):
+        "//a[@class='business fire_station']",
+        "Fire Training"):
         return False
 
-    dropdown_xpath = "//select[@name='action']"
-    submit_button_xpath = "//input[@name='B1']"
     success_box_xpath = "//div[@id='success']"
 
-    # Check available options in dropdown
-    options = _get_dropdown_options(By.XPATH, dropdown_xpath)
-    if not options:
-        print("FAILED: Could not retrieve dropdown options.")
-        return False
+    # If the first-time option exists, click it; otherwise select "Yes" (continue)
+    accept_opt = _find_element(By.XPATH, "//option[@value='acceptfire']", timeout=1, suppress_logging=True)
 
-    # Determine if beginning training, or subsequent training
-    if any("acceptfire" in opt.lower() for opt in options):
-        option_to_select = "acceptfire"
-        print("Step: Signing up for Fire Training...")
-    elif any("yes" in opt.lower() for opt in options):
-        option_to_select = "Yes"
-        print("Step: Continuing Fire Training...")
+    if accept_opt:
+        print("Step: Signing up for Fire Training.")
+        if not _find_and_click(By.XPATH, "//option[@value='acceptfire']"):
+            print("FAILED: Could not click 'Yes, I would like to join' option.")
+            return False
     else:
-        print("FAILED: No relevant training option found.")
-        return False
+        print("Step: Continuing Fire Training (subsequent training).")
+        yes_option_xpath = "//select[@name='action']/option[@value='Yes']"
 
-    # Select the right drop-down option
-    if not _select_dropdown_option(By.XPATH, dropdown_xpath, option_to_select, use_value=True):
-        print("FAILED: Could not select training option.")
-        return False
+        # Try to click "Yes", with one retry after focusing the dropdown
+        if not _find_and_click(By.XPATH, yes_option_xpath):
+            _find_and_click(By.XPATH, "//select[@name='action']")
+            if not _find_and_click(By.XPATH, yes_option_xpath):
+                print("FAILED: Could not select 'Yes' from dropdown.")
+                return False
 
-    #  Click Submit
-    if not _find_and_click(By.XPATH, submit_button_xpath):
+    # Submit the form
+    if not _find_and_click(By.XPATH, "//input[@name='B1']"):
         print("FAILED: Could not click Submit.")
         return False
 
     # Check training progress to determine how many trains left to do
-    if option_to_select == "Yes":
-        success_text = _get_element_text(By.XPATH, success_box_xpath)
-        if success_text:
-            print(f"Success Message: '{success_text}'")
-            match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
-            if match:
-                current = int(match.group(1))
-                total = int(match.group(2))
-                print(f"Training Progress: {current}/{total}")
-                if current >= total:
-                    print("Training complete. No further action required.")
-                    _write_json_file(global_vars.FIRE_TRAINING_DONE_FILE, True)
-                    return False
-            else:
-                print("WARNING: Could not parse training progress.")
+    success_text = _get_element_text(By.XPATH, success_box_xpath)
+    if success_text:
+        print(f"Success Message: '{success_text}'")
+        match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
+        if match:
+            current = int(match.group(1))
+            total = int(match.group(2))
+            print(f"Training Progress: {current}/{total}")
         else:
-            print("WARNING: Success message not found after submitting.")
-            # Final fallback: Check for completion paragraph
-            final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]")
-            if final_text and "your hard work in training has paid off" in final_text.lower():
-                _write_json_file(global_vars.FIRE_TRAINING_DONE_FILE, True)
-                print("FINAL SUCCESS: Training is now fully complete.")
-                return False
+            print("WARNING: Could not parse training progress.")
+    else:
+        print("No success box found — likely finished training.")
+        # Final fallback: Check for completion paragraph
+        final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]") or ""
+        if "your hard work" in final_text.lower():
+            _write_json_file(global_vars.FIRE_TRAINING_DONE_FILE, True)
+            print("FINAL SUCCESS: Fire training is now fully complete.")
+            return False
 
     print("Fire training step completed successfully.")
     return True
@@ -1180,65 +1163,54 @@ def customs_training():
     if not _navigate_to_page_via_menu(
         "//span[@class='city']",
         "//a[@class='business customs']",
-        "Customs Training"
-    ):
+        "Customs Training"):
         return False
 
-    dropdown_xpath = "//select[@name='action']"
-    submit_button_xpath = "//input[@name='B1']"
     success_box_xpath = "//div[@id='success']"
 
-    # Check available options in dropdown
-    options = _get_dropdown_options(By.XPATH, dropdown_xpath)
-    if not options:
-        print("FAILED: Could not retrieve dropdown options.")
-        return False
+    # If the first-time option exists, click it; otherwise select "Yes" (continue)
+    accept_opt = _find_element(By.XPATH, "//option[@value='acceptcustoms']", timeout=1, suppress_logging=True)
 
-    # Determine if beginning training, or subsequent training
-    if any("acceptcustoms" in opt.lower() for opt in options):
-        option_to_select = "acceptcustoms"
-        print("Step: Signing up for Customs Training...")
-    elif any("yes" in opt.lower() for opt in options):
-        option_to_select = "Yes"
-        print("Step: Continuing Customs Training...")
+    if accept_opt:
+        print("Step: Signing up for Customs Training.")
+        if not _find_and_click(By.XPATH, "//option[@value='acceptcustoms']"):
+            print("FAILED: Could not click 'Yes, I would like to join' option.")
+            return False
     else:
-        print("FAILED: No relevant training option found.")
-        return False
+        print("Step: Continuing Customs Training (subsequent training).")
+        yes_option_xpath = "//select[@name='action']/option[@value='Yes']"
 
-    # Select the right drop-down option
-    if not _select_dropdown_option(By.XPATH, dropdown_xpath, option_to_select, use_value=True):
-        print("FAILED: Could not select training option.")
-        return False
+        # Try to click "Yes", with one retry after focusing the dropdown
+        if not _find_and_click(By.XPATH, yes_option_xpath):
+            _find_and_click(By.XPATH, "//select[@name='action']")
+            if not _find_and_click(By.XPATH, yes_option_xpath):
+                print("FAILED: Could not select 'Yes' from dropdown.")
+                return False
 
-    #  Click Submit
-    if not _find_and_click(By.XPATH, submit_button_xpath):
+    # Submit the form
+    if not _find_and_click(By.XPATH, "//input[@name='B1']"):
         print("FAILED: Could not click Submit.")
         return False
 
     # Check training progress to determine how many trains left to do
-    if option_to_select == "Yes":
-        success_text = _get_element_text(By.XPATH, success_box_xpath)
-        if success_text:
-            print(f"Success Message: '{success_text}'")
-            match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
-            if match:
-                current = int(match.group(1))
-                total = int(match.group(2))
-                print(f"Training Progress: {current}/{total}")
-                if current >= total:
-                    print("Training complete. No further action required.")
-                    _write_json_file(global_vars.CUSTOMS_TRAINING_DONE_FILE, True)
-                    return False
-            else:
-                print("WARNING: Could not parse training progress.")
+    success_text = _get_element_text(By.XPATH, success_box_xpath)
+    if success_text:
+        print(f"Success Message: '{success_text}'")
+        match = re.search(r"\((\d+)\s+of\s+(\d+)\s+studies\)", success_text)
+        if match:
+            current = int(match.group(1))
+            total = int(match.group(2))
+            print(f"Training Progress: {current}/{total}")
         else:
-            print("WARNING: Success message not found after submitting.")
-            # Final fallback: Check for completion paragraph
-            final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]")
-            if final_text and "your hard work in training has paid off" in final_text.lower():
-                _write_json_file(global_vars.CUSTOMS_TRAINING_DONE_FILE, True)
-                print("FINAL SUCCESS: Training is now fully complete.")
-                return False
+            print("WARNING: Could not parse training progress.")
+    else:
+        print("No success box found — likely the initial join step or a layout change.")
+        # Final fallback: Check for completion paragraph
+        final_text = _get_element_text(By.XPATH, "//div[@id='content']//p[1]") or ""
+        if "your hard work" in final_text.lower():
+            _write_json_file(global_vars.CUSTOMS_TRAINING_DONE_FILE, True)
+            print("FINAL SUCCESS: Customs training is now fully complete.")
+            return False
 
     print("Customs training step completed successfully.")
     return True

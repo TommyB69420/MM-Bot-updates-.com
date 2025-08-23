@@ -4,7 +4,8 @@ import re
 import requests
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
-from helper_functions import _find_element, _find_elements, _find_and_click, _get_element_text, _navigate_to_page_via_menu, _select_dropdown_option
+from helper_functions import _find_element, _find_elements, _find_and_click, _get_element_text, \
+    _navigate_to_page_via_menu, _select_dropdown_option, enqueue_blind_eyes
 import global_vars
 from helper_functions import _find_element, _find_and_click, _get_element_text
 import math
@@ -264,8 +265,11 @@ def _process_requests_offers_entries():
                     )
                     entry_content = entry_content.strip()
 
-                    # Try accepting lawyer rep if enabled
+                    # Accepting lawyer rep if enabled
                     accept_lawyer_rep(entry_content)
+
+                    # Accepting blind eye offer
+                    accept_blind_eye_offer(entry_content)
 
                     print(f"Processing NEW Request/Offer - Title: '{entry_title}', Time: '{entry_time}'")
                     full_discord_message = f"New Request/Offer - Title: {entry_title}, Time: {entry_time}, Content: {entry_content}"
@@ -473,6 +477,21 @@ def accept_lawyer_rep(entry_content):
                 print("FAILED to click ACCEPT for lawyer representation.")
     except Exception as e:
         print(f"Exception during lawyer rep acceptance attempt: {e}")
+
+def accept_blind_eye_offer(entry_content: str):
+    """
+    If entry_content contains 'blind eye', attempts to click ACCEPT and queue it.
+    """
+    try:
+        if "blind eye" in entry_content.lower():
+            print("Detected Blind Eye Offer. Attempting to accept it...")
+            if _find_and_click(By.XPATH, "//a[normalize-space()='ACCEPT']", pause=global_vars.ACTION_PAUSE_SECONDS):
+                enqueue_blind_eyes(1)
+                print("Successfully accepted Blind Eye offer and queued it.")
+            else:
+                print("FAILED to click ACCEPT for Blind Eye offer.")
+    except Exception as e:
+        print(f"Exception during blind eye acceptance attempt: {e}")
 
 
 def check_into_hospital_for_surgery():

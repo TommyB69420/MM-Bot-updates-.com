@@ -1,9 +1,11 @@
+import os
 import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.select import Select
 import global_vars
+from database_functions import _write_json_file, _read_json_file
 from global_vars import driver, wait, EXPLICIT_WAIT_SECONDS, ACTION_PAUSE_SECONDS, driver
 
 # --- Helper Functions for WebDriver Interactions ---
@@ -185,3 +187,26 @@ def is_player_in_jail():
     """Returns True if the current URL suggests the player is in jail."""
     current_url = global_vars.driver.current_url
     return "jail" in current_url.lower()
+
+def enqueue_blind_eyes(n: int = 1):
+    """Append n units to the Blind Eye queue."""
+    os.makedirs(os.path.dirname(global_vars.BLIND_EYE_QUEUE_FILE), exist_ok=True)
+    q = _read_json_file(global_vars.BLIND_EYE_QUEUE_FILE) or []
+    if not isinstance(q, list):
+        q = []
+    q.extend(["accepted"] * max(0, int(n)))
+    _write_json_file(global_vars.BLIND_EYE_QUEUE_FILE, q)
+
+def dequeue_blind_eye():
+    """Consume a single unit from the Blind Eye queue. Return True if dequeued."""
+    q = _read_json_file(global_vars.BLIND_EYE_QUEUE_FILE) or []
+    if not isinstance(q, list) or not q:
+        return False
+    q.pop(0)
+    _write_json_file(global_vars.BLIND_EYE_QUEUE_FILE, q)
+    return True
+
+def blind_eye_queue_count():
+    """Current queue count."""
+    q = _read_json_file(global_vars.BLIND_EYE_QUEUE_FILE) or []
+    return len(q) if isinstance(q, list) else 0
