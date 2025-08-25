@@ -2,6 +2,8 @@ import datetime
 import random
 import time
 from selenium.webdriver.common.by import By
+
+import global_vars
 from global_vars import ACTION_PAUSE_SECONDS, config
 from helper_functions import _find_and_click, _find_element, _navigate_to_page_via_menu
 
@@ -29,20 +31,26 @@ def execute_earns_logic():
     global _script_earn_cooldown_end_time
     print("\n--- Beginning Earn Operation ---")
 
+    # Check if we must reselect an earn after promotion
+    force_reselect = getattr(global_vars, "force_reselect_earn", False)
+    if force_reselect:
+        print("Post-promotion: skipping quick-earn dropdown; reselecting via Earns page.")
+
     try:
-        quick_earn_arrow_xpath = ".//*[@id='nav_left']/p[5]/a[2]/img"
-        if _find_element(By.XPATH, quick_earn_arrow_xpath, timeout=1):
-            if _find_and_click(By.XPATH, quick_earn_arrow_xpath):
-                time.sleep(ACTION_PAUSE_SECONDS)
-                if _find_and_click(By.NAME, "lastearn"):
-                    print("Quick earn successful via dropdown.")
-                    return True
+        if not force_reselect:
+            quick_earn_arrow_xpath = ".//*[@id='nav_left']/p[5]/a[2]/img"
+            if _find_element(By.XPATH, quick_earn_arrow_xpath, timeout=1):
+                if _find_and_click(By.XPATH, quick_earn_arrow_xpath):
+                    time.sleep(ACTION_PAUSE_SECONDS)
+                    if _find_and_click(By.NAME, "lastearn"):
+                        print("Quick earn successful via dropdown.")
+                        return True
+                    else:
+                        print("Quick earn dropdown clicked but 'lastearn' still not found. Proceeding to regular menu.")
                 else:
-                    print("Quick earn dropdown clicked but 'lastearn' still not found. Proceeding to regular menu.")
+                    print("Failed to click quick earn arrow. Proceeding to regular menu.")
             else:
-                print("Failed to click quick earn arrow. Proceeding to regular menu.")
-        else:
-            print("Quick earn arrow element not found. Proceeding to regular menu.")
+                print("Quick earn arrow element not found. Proceeding to regular menu.")
     except Exception as e:
         print(f"Error during quick earn attempt: {e}. Proceeding to regular menu.")
 
@@ -92,5 +100,8 @@ def execute_earns_logic():
         _script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
-    print(f"Earn action'{final_earn_to_click}' completed completed.")
+    print(f"Earn action '{final_earn_to_click}' completed.")
+    if force_reselect:
+        setattr(global_vars, "force_reselect_earn", False)
+        print("Post-promotion: earn reselected successfully; flag cleared.")
     return True

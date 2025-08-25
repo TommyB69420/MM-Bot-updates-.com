@@ -86,6 +86,7 @@ COMBAT_TRAINING_DONE = os.path.join(COOLDOWN_DATA_DIR, "combat_training_complete
 CUSTOMS_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "customs_training_done.json")
 FIRE_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "fire_training_done.json")
 BLIND_EYE_QUEUE_FILE = os.path.join(COOLDOWN_DATA_DIR, "blind_eye_queue.json")
+COMMUNITY_SERVICE_QUEUE_FILE = os.path.join(COOLDOWN_DATA_DIR, "community_service_queue.json")
 
 # Define keys for database (aggravated_crime_cooldowns.json) entries
 MINOR_CRIME_COOLDOWN_KEY = 'minor_crime_cooldown'
@@ -113,6 +114,7 @@ _script_gym_train_cooldown_end_time = datetime.datetime.now()
 _script_bionics_shop_cooldown_end_time = datetime.datetime.now()
 _script_weapon_shop_cooldown_end_time = datetime.datetime.now()
 _script_drug_store_cooldown_end_time = datetime.datetime.now()
+_script_promo_check_cooldown_end_time = datetime.datetime.now()
 jail_timers = {}
 
 # Global variable to store the last known unread message and journal count
@@ -121,6 +123,9 @@ _last_unread_journal_count = 0
 
 # Global variable to store the initial URL. This will be replaced once the driver is established in Main.py
 initial_game_url = None
+
+# Global Variable to store if the script needs to reselect an earn after taking a promotion.
+force_reselect_earn = False
 
 # Global variables to store hacked player and amount for repayment
 hacked_player_for_repay = None
@@ -175,3 +180,59 @@ ALL_WEAPON_NAMES = [
     "Protection Vest", "Kevlar Bullet Proof Vest", "Riot Shield"
 ]
 ALL_WEAPON_NAMES_LOWER = [weapon.lower() for weapon in ALL_WEAPON_NAMES]
+
+# Auto-Promotion Map
+PROMO_MAP = {
+    # Hospital
+    "nurse": "one",
+    "doctor": "two",
+    "surgeon": "two",
+    "hospital director": "one",
+
+    # Bank
+    "bank teller": "one",
+    "loan officer": "two",
+    "bank manager": "one",
+
+    # Engineering
+    "mechanic": "two",
+    "technician": "one",
+    "engineer": "one",
+    "chief engineer": "two",
+
+    # Funeral
+    "mortician assistant": "one",
+    "mortician": "one",
+    "undertaker": "two",
+    "funeral director": "one",
+
+    # Fire
+    "fire fighter": "one",
+    "fire chief": "one",
+
+    # Customs
+    "inspector": "two",
+    "supervisor": "one",
+    "superintendent": "one",
+    "commissioner-general": "two",
+    "commissioner general": "two",
+
+    # Law (manual for judge/SCJ)
+    "legal secretary": "one",
+    "lawyer": "one",
+
+    # Gangster (manual for Gio/Godfather/Capi)
+    "dealer": "two",
+    "enforcer": "one",
+    "piciotto": "two",
+    "sgarrista": "one",
+    "capodecima": "one",
+    "caporegime": "one",
+    "boss": "two",
+    "don": "one",
+
+    # Police (manual for commissioner)
+    "sergeant": "two",
+    "senior sergeant": "two",
+    "detective": "one",
+}

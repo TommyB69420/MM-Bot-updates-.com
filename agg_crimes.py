@@ -8,7 +8,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from database_functions import _read_json_file, get_player_cooldown, set_player_data, _set_last_timestamp, remove_player_cooldown
 import global_vars
-from helper_functions import _navigate_to_page_via_menu, _find_and_click, _find_and_send_keys, _get_element_text, _find_element
+from helper_functions import _navigate_to_page_via_menu, _find_and_click, _find_and_send_keys, _get_element_text, \
+    _find_element, community_service_queue_count, _get_element_text_quiet, enqueue_community_services
 from misc_functions import transfer_money
 from timer_functions import parse_game_datetime
 from comms_journals import send_discord_notification
@@ -164,6 +165,18 @@ def _open_aggravated_crime_page(crime_type):
             "Aggravated Crime Page"
     ):
             return False
+
+        # check the page-level fail box before touching any radio <<<
+        fail_text = _get_element_text_quiet(By.XPATH, "//div[@id='fail']")
+        if fail_text:
+            # Example text: "You cannot commit an aggravated crime until you have completed another 1 Services to your community!"
+            m = re.search(r"another\s+(\d+)\s+Services", (fail_text or ""), re.IGNORECASE)
+            if m:
+                needed = int(m.group(1))
+                if needed > 0:
+                    enqueue_community_services(needed)
+                    print(f"Aggravated Crime gate requires {needed} Community Service(s). Queued them.")
+                    return False  # Bail out here; Main will process the CS queue.
 
     radio_button_xpath = {
         "Hack": "//input[@type='radio' and @value='hack' and @name='agcrime']",
@@ -354,6 +367,12 @@ def _get_business_owner_and_repay(business_name, amount_stolen, player_data):
 
 def execute_aggravated_crime_logic(player_data):
     """Manages hacking, pickpocketing, mugging, armed robberies, and torch operations."""
+
+    # Hard block: cannot attempt AgCrime while Services are queued
+    if community_service_queue_count() > 0:
+        print("Aggravated Crime blocked: mandatory Community Service queued. Skipping until queue is cleared.")
+        global_vars._script_agg_crime_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=5)
+        return False
 
     do_hack = global_vars.config.getboolean('Hack', 'DoHack', fallback=False)
     hack_repay = global_vars.config.getboolean('Hack', 'Repay', fallback=False)

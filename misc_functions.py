@@ -1214,3 +1214,85 @@ def customs_training():
 
     print("Customs training step completed successfully.")
     return True
+
+def map_promo_choice(promo_name: str):
+    """
+    Lookup-based promo choice against global_vars.PROMO_MAP.
+    Returns 'one' or 'two' if a keyword matches, else None for manual.
+    """
+    key = (promo_name or "").lower().strip()
+    for keyword, choice in global_vars.PROMO_MAP.items():
+        if keyword in key:
+            return choice
+    return None
+
+
+def take_promotion():
+    """
+    Automatically checks and takes promotions:
+      - Reads [Misc] TakePromo in settings.ini
+      - Clicks the MMM logo to trigger promo
+      - If on Promotion page, picks mapped option and continues
+      - Notifies Discord
+    Returns True if a promotion was taken; False otherwise.
+    """
+
+    print("\n--- Promotion Check ---")
+
+    # Click the MM logo which triggers promo if one exists
+    if not _find_and_click(By.XPATH, "//*[@id='logo_hit']", pause=global_vars.ACTION_PAUSE_SECONDS):
+        print("Promo: Could not click logo.")
+        return False
+
+    time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+    curr_url = (_get_current_url() or "").lower()
+    if "promotion" not in curr_url:
+        print("Promo: No promotion detected.")
+        global_vars._script_promo_check_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=random.uniform(2, 4))
+        return False
+
+    print("Promo page detected — parsing details...")
+
+    # Read promo header
+    header_el = _find_element(By.XPATH, "//*[@id='holder_top']/h1")
+    promo_name = (header_el.text if header_el else "").strip()
+    if not promo_name:
+        print("Promo: Could not read promotion header.")
+        return False
+
+    print(f"Detected Promotion: {promo_name}")
+
+    choice = map_promo_choice(promo_name)
+    if choice not in {"one", "two"}:
+        msg = f"Unable to auto-take promotion — manual action required: {promo_name}"
+        print("Promo:", msg)
+        global_vars._script_promo_check_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=random.uniform(2, 4))
+        try:
+            send_discord_notification(msg)
+        except Exception:
+            pass
+        return False
+
+    # Click the mapped option
+    if not _find_and_click(By.ID, choice, pause=global_vars.ACTION_PAUSE_SECONDS):
+        print(f"Promo: Could not click option '{choice}'.")
+        global_vars._script_promo_check_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=random.uniform(2, 4))
+        return False
+
+    # Continue
+    if not _find_and_click(By.XPATH, "//*[@id='holder_content']/form/center/input", pause=global_vars.ACTION_PAUSE_SECONDS):
+        print("Promo: Could not click Continue.")
+        global_vars._script_promo_check_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(minutes=random.uniform(2, 4))
+        return False
+
+    print("Promo: Continue clicked — promotion accepted.")
+    try:
+        send_discord_notification(f"Taking promotion: {promo_name}")
+    except Exception:
+        pass
+
+    setattr(global_vars, "force_reselect_earn", True)
+    print("Promo: Flag set to force reselecting earn on next cycle.")
+
+    return True

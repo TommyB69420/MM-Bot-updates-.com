@@ -80,8 +80,17 @@ def _find_and_send_keys(by_type, value, keys, timeout=EXPLICIT_WAIT_SECONDS, pau
     return False
 
 def _get_element_text(by_type, value, timeout=EXPLICIT_WAIT_SECONDS):
-    """Gets text from an element."""
+    """Gets text from an element.
+    This adds the explicit wait which is useful when an element needs to load"""
     element = _find_element(by_type, value, timeout)
+    return element.text.strip() if element else None
+
+def _get_element_text_quiet(by_type, value, timeout=0.2):
+    """
+    Gets text from an element with a tiny timeout and no logging.
+    Intended for optional/ephemeral UI like #fail banners.
+    """
+    element = _find_element(by_type, value, timeout=timeout, suppress_logging=True)
     return element.text.strip() if element else None
 
 def _get_element_attribute(by_type, value, attribute, timeout=EXPLICIT_WAIT_SECONDS):
@@ -184,9 +193,19 @@ def _select_dropdown_option(by_type, value, option_text, timeout=EXPLICIT_WAIT_S
         return False
 
 def is_player_in_jail():
-    """Returns True if the current URL suggests the player is in jail."""
+    """Returns True if either the URL or nav element suggests the player is in jail."""
+    # Check URL
     current_url = global_vars.driver.current_url
-    return "jail" in current_url.lower()
+    if "jail" in current_url.lower():
+        return True
+
+    # Check for the word 'jail' in the right nav bar
+    nav_text = _get_element_text_quiet(By.XPATH, "//div[@id='nav_right']//div[3]")
+    if nav_text and "jail" in nav_text.lower():
+        return True
+
+    return False
+
 
 def enqueue_blind_eyes(n: int = 1):
     """Append n units to the Blind Eye queue."""
@@ -210,3 +229,27 @@ def blind_eye_queue_count():
     """Current queue count."""
     q = _read_json_file(global_vars.BLIND_EYE_QUEUE_FILE) or []
     return len(q) if isinstance(q, list) else 0
+
+def enqueue_community_services(n: int = 1):
+    """Append n units to the Community Service queue (pre-AgCrime requirement)."""
+    os.makedirs(os.path.dirname(global_vars.COMMUNITY_SERVICE_QUEUE_FILE), exist_ok=True)
+    q = _read_json_file(global_vars.COMMUNITY_SERVICE_QUEUE_FILE) or []
+    if not isinstance(q, list):
+        q = []
+    q.extend(["required"] * max(0, int(n)))
+    _write_json_file(global_vars.COMMUNITY_SERVICE_QUEUE_FILE, q)
+
+def dequeue_community_service():
+    """Consume a single unit from the Community Service queue. Return True if dequeued."""
+    q = _read_json_file(global_vars.COMMUNITY_SERVICE_QUEUE_FILE) or []
+    if not isinstance(q, list) or not q:
+        return False
+    q.pop(0)
+    _write_json_file(global_vars.COMMUNITY_SERVICE_QUEUE_FILE, q)
+    return True
+
+def community_service_queue_count():
+    """Current queued number of mandatory community services."""
+    q = _read_json_file(global_vars.COMMUNITY_SERVICE_QUEUE_FILE) or []
+    return len(q) if isinstance(q, list) else 0
+

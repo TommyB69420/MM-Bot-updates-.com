@@ -11,12 +11,14 @@ from occupations import judge_casework, lawyer_casework, medical_casework, commu
     manufacture_drugs, banker_laundering, banker_add_clients, fire_casework, fire_duties, engineering_casework, \
     customs_blind_eyes
 from helper_functions import _get_element_text, _find_and_send_keys, _find_and_click, is_player_in_jail, \
-    blind_eye_queue_count
+    blind_eye_queue_count, community_service_queue_count, dequeue_community_service
 from database_functions import init_local_db
 from police import police_911, prepare_police_cases, train_forensics
 from timer_functions import get_all_active_game_timers
 from comms_journals import send_discord_notification, get_unread_message_count, read_and_send_new_messages, get_unread_journal_count, process_unread_journal_entries
-from misc_functions import study_degrees, do_events, check_weapon_shop, check_drug_store, jail_work, clean_money_on_hand_logic, gym_training, check_bionics_shop, police_training, combat_training, fire_training, customs_training
+from misc_functions import study_degrees, do_events, check_weapon_shop, check_drug_store, jail_work, \
+    clean_money_on_hand_logic, gym_training, check_bionics_shop, police_training, combat_training, fire_training, \
+    customs_training, take_promotion
 
 # --- Initialize Local Cooldown Database ---
 if not init_local_db():
@@ -36,21 +38,37 @@ def fetch_initial_player_data():
         "Clean Money": {"xpath": "//div[@id='nav_right']//form[contains(., '$')]", "is_money": True},
         "Dirty Money": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Dirty money']/following-sibling::div[1]", "is_money": True},
         "Location": {"xpath": "//div[@id='nav_right']/div[contains(normalize-space(text()), 'Location')]/following-sibling::div[1]", "is_money": False, "strip_label": "Location:"},
-        "Home City": {"xpath": "//div[contains(text(), 'Home City')]/following-sibling::div[1]", "is_money": False, "strip_label": "Home city:"}
+        "Home City": {"xpath": "//div[contains(text(), 'Home City')]/following-sibling::div[1]", "is_money": False, "strip_label": "Home city:"},
+        "Next Rank": {"xpath": "//div[@id='nav_right']//div[@role='progressbar' and contains(@class,'bg-rankprogress')]", "attr": "aria-valuenow", "is_percent": True}
     }
 
     for key, details in data_elements.items():
-        text_content = _get_element_text(By.XPATH, details["xpath"])
-        if text_content:
+        raw = None
+
+        # Use attribute if specified
+        if "attr" in details:
+            from helper_functions import _get_element_attribute
+            raw = _get_element_attribute(By.XPATH, details["xpath"], details["attr"])
+        else:
+            raw = _get_element_text(By.XPATH, details["xpath"])
+
+        if raw:
+            text_content = raw.strip()
             if details.get("strip_label"):
                 text_content = text_content.replace(details["strip_label"], "").strip()
-            if details["is_money"]:
+
+            if details.get("is_money"):
                 player_data[key] = int(''.join(filter(str.isdigit, text_content)))
+            elif details.get("is_percent"):
+                # Handle values like "38" or "38%"
+                digits = ''.join(ch for ch in text_content if ch.isdigit())
+                player_data[key] = int(digits) if digits else None
             else:
                 player_data[key] = text_content
         else:
             print(f"Warning: Could not fetch {key}.")
             player_data[key] = None
+
     return player_data
 
 def check_for_logout_and_login():
@@ -157,9 +175,10 @@ def get_enabled_configs(location):
     "do_post_911_enabled": config.getboolean('Police', 'Post911', fallback=False),
     "do_police_cases_enabled": config.getboolean('Police', 'DoCases', fallback=False),
     "do_bank_add_clients_enabled": config.getboolean('Bank', 'AddClients', fallback=False) and location == home_city and occupation in ["Bank Teller", "Loan Officer", "Bank Manager"],
+    "do_auto_promo_enabled": config.getboolean('Misc', 'TakePromo', fallback=True) and (next_rank_pct >= 95),
 }
 
-def _determine_sleep_duration(action_performed_in_cycle, timers_data):
+def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_configs, next_rank_pc):
     """
     Determines the optimal sleep duration based on enabled activities and cooldown timers.
     """
@@ -190,6 +209,7 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data):
     bionics = get_timer('check_bionics_store_time_remaining')
     post_911 = get_timer('post_911_time_remaining')
     trafficking = get_timer('trafficking_time_remaining')
+    auto_promo = get_timer('promo_check_time_remaining')
 
     cfg = global_vars.config
     businesses = global_vars.private_businesses
@@ -211,6 +231,8 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data):
         active.append(('Launder', launder))
     if cfg.get('Actions Settings', 'Training', fallback='').strip() and location == home_city:
         active.append(('Training', action))
+    if enabled_configs.get('do_auto_promo_enabled'):
+        active.append(('Auto Promo', auto_promo))
     active.append(('Yellow Pages Scan', yps))
     active.append(('Funeral Parlour Scan', fps))
 
@@ -362,25 +384,25 @@ while True:
     all_timers = get_all_active_game_timers()
     global_vars.jail_timers = all_timers  # Store for jail logic access
 
+    # Fetch the player data
+    initial_player_data = fetch_initial_player_data()
+    character_name = initial_player_data.get("Character Name", "UNKNOWN")
+
     # --- Jail Check ---
     if is_player_in_jail():
         print("Player is in jail. Entering jail work loop...")
 
         while is_player_in_jail():
+            # check for script checks and logouts in jail
+            if perform_critical_checks(character_name):
+                continue
+
             global_vars.jail_timers = get_all_active_game_timers()
             jail_work()
             time.sleep(2)  # Tighter loop for responsiveness
 
         print("Player released from jail. Resuming normal script.")
         continue  # Skip the rest of the main loop for this cycle
-
-    # Do i need the below?
-    # global_vars.driver.refresh()
-    # time.sleep(2)
-
-    # Fetch the player data
-    initial_player_data = fetch_initial_player_data()
-    character_name = initial_player_data.get("Character Name", "UNKNOWN")
 
     # Critical checks are performed throughout the loop to ensure script checks and log-outs are captured quickly
     if perform_critical_checks(character_name):
@@ -395,7 +417,8 @@ while True:
     dirty_money = initial_player_data.get("Dirty Money")
     location = initial_player_data.get("Location")
     home_city = initial_player_data.get("Home City")
-    print(f"Current Character: {character_name}, Rank: {rank}, Occupation: {occupation}, Clean Money: {clean_money}, Dirty Money: {dirty_money}, Location: {location}. Home City: {home_city}")
+    next_rank_pct = initial_player_data.get("Next Rank")
+    print(f"Current Character: {character_name}, Rank: {rank}, Occupation: {occupation}, Clean Money: {clean_money}, Dirty Money: {dirty_money}, Location: {location}. Home City: {home_city}. Next Rank {next_rank_pct}.")
 
     # Read enabled configs.
     enabled_configs = get_enabled_configs(location)
@@ -429,10 +452,20 @@ while True:
     check_drug_store_time_remaining = all_timers.get('check_drug_store_time_remaining', float('inf'))
     gym_trains_time_remaining = all_timers.get('gym_trains_time_remaining', float('inf'))
     check_bionics_store_time_remaining = all_timers.get('check_bionics_store_time_remaining', float('inf'))
+    promo_check_time_remaining = all_timers.get('promo_check_time_remaining', float('inf'))
 
     # Career specific timers
     bank_add_clients_time_remaining = all_timers.get('bank_add_clients_time_remaining', float('inf'))
     post_911_time_remaining = all_timers.get('post_911_time_remaining', float('inf'))
+
+    if perform_critical_checks(character_name):
+        continue
+
+    # Auto Promo logic
+    if enabled_configs['do_auto_promo_enabled'] and promo_check_time_remaining <= 0:
+        print(f"Auto Promo timer ({promo_check_time_remaining:.2f}s) is ready. Attempting auto-promotion...")
+        if take_promotion():
+            action_performed_in_cycle = True
 
     if perform_critical_checks(character_name):
         continue
@@ -469,6 +502,17 @@ while True:
 
     if perform_critical_checks(character_name):
         continue
+
+    # Mandatory Community Services (queued by AgCrime gate)
+    queued_cs = community_service_queue_count()
+    if queued_cs > 0 and action_time_remaining <= 0:
+        print(f"Mandatory Community Service queued ({queued_cs}). Attempting 1 now.")
+        if community_services(initial_player_data):
+            if dequeue_community_service():
+                print(f"Completed 1 queued Community Service. Remaining: {community_service_queue_count()}")
+            action_performed_in_cycle = True
+        else:
+            print("Queued Community Service attempt failed or could not start. Will retry next cycle.")
 
     # Community Service Logic
     if enabled_configs['do_community_services_enabled'] and action_time_remaining <= 0:
@@ -549,26 +593,30 @@ while True:
         enabled_configs['do_pickpocket_enabled'],
         enabled_configs['do_mugging_enabled'],
         enabled_configs['do_armed_robbery_enabled'],
-        enabled_configs['do_torch_enabled']
+        enabled_configs['do_torch_enabled'],
     ]):
-        # Hack / Pickpocket / Mugging — check general timer only
+        # Hack / Pickpocket / Mugging — only if no mandatory CS queued
         if any([
             enabled_configs['do_hack_enabled'],
             enabled_configs['do_pickpocket_enabled'],
-            enabled_configs['do_mugging_enabled']
-        ]) and aggravated_crime_time_remaining <= 0:
+            enabled_configs['do_mugging_enabled'],
+        ]) and aggravated_crime_time_remaining <= 0 and community_service_queue_count() == 0:
             should_attempt_aggravated_crime = True
             print(f"Aggravated Crime (Hack/Pickpocket/Mugging) timer ({aggravated_crime_time_remaining:.2f}s) is ready. Attempting crime.")
 
-        # Armed Robbery — needs general + recheck timer
+        # Armed Robbery — only if no mandatory CS queued
         if enabled_configs['do_armed_robbery_enabled']:
-            if aggravated_crime_time_remaining <= 0 and armed_robbery_recheck_time_remaining <= 0:
+            if (aggravated_crime_time_remaining <= 0
+                    and armed_robbery_recheck_time_remaining <= 0
+                    and community_service_queue_count() == 0):
                 should_attempt_aggravated_crime = True
                 print("Armed Robbery timers are ready. Attempting crime.")
 
-        # Torch — needs general + recheck timer
+        # Torch — only if no mandatory CS queued
         if enabled_configs['do_torch_enabled']:
-            if aggravated_crime_time_remaining <= 0 and torch_recheck_time_remaining <= 0:
+            if (aggravated_crime_time_remaining <= 0
+                    and torch_recheck_time_remaining <= 0
+                    and community_service_queue_count() == 0):
                 should_attempt_aggravated_crime = True
                 print("Torch timers are ready. Attempting crime.")
 
@@ -648,7 +696,7 @@ while True:
         continue
 
     # Do Lawyer case work logic
-    if occupation in "Lawyer" and case_time_remaining <= 0:
+    if occupation == "Lawyer" and case_time_remaining <= 0:
         print(f"Lawyer Casework timer ({case_time_remaining:.2f}s) is ready. Attempting lawyer cases.")
         if lawyer_casework():
             action_performed_in_cycle = True
@@ -796,7 +844,7 @@ while True:
         print("WARNING: No 'RestingPage' URL set in settings.ini under [Auth].")
 
     # --- Determine the total sleep duration ---
-    total_sleep_duration = _determine_sleep_duration(action_performed_in_cycle, {**all_timers, 'occupation': occupation, 'location': location, 'home_city': home_city})
+    total_sleep_duration = _determine_sleep_duration(action_performed_in_cycle, {**all_timers, 'occupation': occupation, 'location': location, 'home_city': home_city}, enabled_configs, next_rank_pct)
 
     print(f"Sleeping for {total_sleep_duration:.2f} seconds...")
     time.sleep(total_sleep_duration)

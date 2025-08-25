@@ -346,10 +346,6 @@ def engineering_casework(player_data):
     Super-simple engineering: open Maintenance & Construction via Income menu,
     pick the first available job, submit. No prioritization.
     """
-    import datetime, random, time
-    from selenium.webdriver.common.by import By
-    import global_vars
-    from helper_functions import _navigate_to_page_via_menu, _find_elements
 
     print("\n--- Beginning Engineering Casework ---")
 
@@ -357,38 +353,57 @@ def engineering_casework(player_data):
     if not _navigate_to_page_via_menu(
         "//span[@class='income']",
         "//a[normalize-space()='Maintenance and Construction']",
-        "Maintenance and Construction Page"
-    ):
+        "Maintenance and Construction Page"):
         print("FAILED: Navigation to Maintenance and Construction page failed.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
     print("On Maintenance & Construction. Looking for the first available task…")
 
-    # Grab the first visible radio input anywhere under holder_content
+    # Capture your own name for filtering
+    your_character_name = (player_data or {}).get("Character Name", "")
+
+    # Find all selectable tasks
     radios = _find_elements(By.XPATH, ".//*[@id='holder_content']//input[@type='radio']")
     if not radios:
         print("No selectable tasks (no radio inputs found). Short cooldown.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
         return False
 
-    # If id prefer the last available radio button instead of first available, change radios[0] to radios[-1]; Should we wish to prioritise cars.
-    radio = radios[-1]
+    # Loop over radios, skip your own
+    selected_radio = None
+    for candidate in reversed(radios):  # Select last most radio button
+        try:
+            container_text = candidate.find_element(By.XPATH, "./ancestor::tr[1]").text
+            if your_character_name and your_character_name.lower() in container_text.lower():
+                print(f"Skipping self-owned engineering task ({your_character_name}).")
+                continue
+            selected_radio = candidate
+            break
+        except Exception as e:
+            print(f"Warning: could not read a task row: {e}")
+
+    if not selected_radio:
+        print("All available engineering tasks belong to you. Short cooldown.")
+        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
+        return False
+
+    # Click the chosen radio
     try:
-        radio.click()
+        selected_radio.click()
         time.sleep(global_vars.ACTION_PAUSE_SECONDS)
     except Exception as e:
-        print(f"FAILED: Could not click the first radio: {e}")
+        print(f"FAILED: Could not click the selected radio: {e}")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(33, 45))
         return False
 
     # Submit the nearest form for that radio (its ancestor form)
     try:
-        form = radio.find_element(By.XPATH, "./ancestor::form[1]")
+        form = selected_radio.find_element(By.XPATH, "./ancestor::form[1]")
         submit = form.find_element(By.XPATH, ".//input[@type='submit' or @class='submit']")
         submit.click()
         time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
-        print("Successfully started the first available engineering task.")
+        print("Successfully started a non-self engineering task.")
         return True
     except Exception as e:
         print(f"FAILED: Could not submit the selected task: {e}")
@@ -1077,32 +1092,37 @@ def customs_blind_eyes():
         print("FAILED: Commit Crime button not found/clickable")
         return False
 
-    # On blindeye.asp, pick a player in the dropdown and click 'Turn a Blind Eye'. Try a specific form first, then a general fallback
-    select_xpath = "//form[@action='blindeye.asp']//select | //div[@id='holder_content']//form//select"
+    # On blindeye.asp, select a target from the dropdown, then submit
+    select_xpath = ("//form[@action='blindeye.asp']//select[@name='gangster'] | "
+                    "//div[@id='holder_content']//form//select[@name='gangster']")
+
+    # Get all options
     options = _get_dropdown_options(By.XPATH, select_xpath) or []
+    # Filter out placeholders
+    valid = [t.strip() for t in options if t and not t.lower().startswith(("please", "select", "choose", "—", "-", "–"))]
 
-    # Build list of valid, non-placeholder entries
-    valid = []
-    for opt in options:
-        t = (opt or "").strip()
-        low = t.lower()
-        if not t or low.startswith(("select", "choose", "—", "-", "please")):
-            continue
-        valid.append(t)
-
-    # If there are no valid blind eye requests, set a short retry cooldown and bail
     if not valid:
-        print("No valid Blind Eye targets available. Setting short retry cooldown.")
-        global_vars._script_trafficking_cooldown_end_time = (datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(60, 120)))
+        print(f"No valid Blind Eye targets available. Raw options: {options}")
+        global_vars._script_trafficking_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(
+            seconds=random.uniform(60, 120))
         return False
+
+    print(f"Valid Blind Eye targets found: {valid}")
 
     choice = valid[0]
+    if not _select_dropdown_option(By.XPATH, select_xpath, choice):
+        print(f"FAILED: Could not select '{choice}' from dropdown.")
+        return False
 
-    # Finally, submit: usually name='B1' or value text containing 'Turn a Blind Eye'
-    if not _find_and_click(
-        By.XPATH, "//input[@type='submit' and (@name='B1' or contains(@value,'Turn a Blind Eye'))]"):
+    print(f"Selected '{choice}' from Blind Eye dropdown.")
+    time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+    # Submit button or fallback
+    if not _find_and_click(By.XPATH, "//input[@type='submit' and (@name='B1' or contains(@value,'Turn a Blind Eye'))]"):
         print("FAILED: 'Turn a Blind Eye' submit not found/clickable")
         return False
+
+    print(f"Submitted Blind Eye request for '{choice}'.")
 
     # if blind eye is success, consume 1 success token from the JSON file.
     if dequeue_blind_eye():

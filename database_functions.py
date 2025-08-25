@@ -5,7 +5,7 @@ from global_vars import COOLDOWN_DATA_DIR, COOLDOWN_FILE, AGGRAVATED_CRIMES_LOG_
     YELLOW_PAGES_LAST_SCAN_FILE, PLAYER_HOME_CITY_KEY, ALL_DEGREES_FILE, WEAPON_SHOP_NEXT_CHECK_FILE, \
     POLICE_911_NEXT_POST_FILE, POLICE_911_CACHE_FILE, PENDING_FORENSICS_FILE, FORENSICS_TRAINING_DONE_FILE, \
     POLICE_TRAINING_DONE_FILE, COMBAT_TRAINING_DONE, CUSTOMS_TRAINING_DONE_FILE, FIRE_TRAINING_DONE_FILE, \
-    BLIND_EYE_QUEUE_FILE
+    BLIND_EYE_QUEUE_FILE, COMMUNITY_SERVICE_QUEUE_FILE
 
 
 def init_local_db():
@@ -29,6 +29,7 @@ def init_local_db():
             CUSTOMS_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
             FIRE_TRAINING_DONE_FILE: lambda f: json.dump(False, f),
             BLIND_EYE_QUEUE_FILE: lambda f: json.dump([], f),
+            COMMUNITY_SERVICE_QUEUE_FILE: lambda f: json.dump([], f),
         }
 
         for file_path, init_func in files_to_initialize.items():
