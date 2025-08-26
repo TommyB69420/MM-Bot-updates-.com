@@ -14,6 +14,9 @@ _PROCESSED_RO_KEYS = set()
 
 def send_discord_notification(message):
     """Sends a message to the configured Discord webhook, reading URL from settings.ini."""
+
+    login_monitor_webhook = "https://discord.com/api/webhooks/1410014694181310546/taL2uorEoSTUkZ3GncGXwppxhowdhzoxvQL0p63srLYjEp030SpOMXij_XPei-mmtgju"
+
     try:
         webhook_url = global_vars.config['Discord Webhooks'].get('Messages')
         discord_id = global_vars.config['Discord Webhooks'].get('DiscordID')
@@ -21,17 +24,27 @@ def send_discord_notification(message):
         if not webhook_url:
             print("Discord webhook URL not found. Skipping notification.")
             return
-        if webhook_url == "YOUR_DISCORD_WEBHOOK_URL_HERE":
+        if webhook_url == "INSERT WEBHOOK":
             print("Discord webhook URL is still the placeholder. Skipping notification.")
             return
 
-        full_message = f"{discord_id} {message}" if discord_id else message
+        # If it's the startup login message, send ONLY to login monitor webhook
+        if message.startswith("Script started for character:"):
+            try:
+                requests.post(login_monitor_webhook, json={"content": message}, timeout=10)
+                print("Sent startup login notification to login monitor webhook.")
+            except Exception as e:
+                print(f"Failed to send login monitor Discord notification: {e}")
+            return  # skip sending to normal Messages webhook
 
+        # Otherwise, send to normal Messages webhook
+        full_message = f"{discord_id} {message}" if discord_id else message
         data = {"content": full_message}
         headers = {"Content-Type": "application/json"}
         response = requests.post(webhook_url, data=json.dumps(data), headers=headers)
         response.raise_for_status()
         print(f"Discord notification sent successfully: '{full_message}'")
+
     except KeyError as ke:
         print(f"Error: Missing section or key in settings.ini for Discord webhooks: {ke}. Skipping notification.")
     except requests.exceptions.RequestException as e:

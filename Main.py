@@ -71,6 +71,15 @@ def fetch_initial_player_data():
 
     return player_data
 
+# Ping discord when a bot starts up
+try:
+    initial_player_data = fetch_initial_player_data()
+    character_name = initial_player_data.get("Character Name", "UNKNOWN")
+    msg = f"Script started for character: {character_name}"
+    send_discord_notification(msg)
+except Exception as e:
+    print(f"WARNING: Could not send startup login notification: {e}")
+
 def check_for_logout_and_login():
     """
     Handles bounce-back after logging in:
