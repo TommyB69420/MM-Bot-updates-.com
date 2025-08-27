@@ -71,15 +71,6 @@ def fetch_initial_player_data():
 
     return player_data
 
-# Ping discord when a bot starts up
-try:
-    initial_player_data = fetch_initial_player_data()
-    character_name = initial_player_data.get("Character Name", "UNKNOWN")
-    msg = f"Script started for character: {character_name}"
-    send_discord_notification(msg)
-except Exception as e:
-    print(f"WARNING: Could not send startup login notification: {e}")
-
 def check_for_logout_and_login():
     """
     Handles bounce-back after logging in:
@@ -124,6 +115,14 @@ def check_for_logout_and_login():
                                pause=global_vars.ACTION_PAUSE_SECONDS * 3):
                 print("Successfully logged in.")
                 send_discord_notification("Logged in successfully!")
+                try:
+                    initial_player_data = fetch_initial_player_data()
+                    character_name = initial_player_data.get("Character Name", "UNKNOWN")
+                    msg = f"Script started for character: {character_name}"
+                    send_discord_notification(msg)
+                except Exception as e:
+                    print(f"WARNING: Could not send startup login notification: {e}")
+
             else:
                 print("Logged in, but Play Now click failed.")
                 send_discord_notification("Logged in, but Play Now click failed.")
@@ -184,7 +183,7 @@ def get_enabled_configs(location):
     "do_post_911_enabled": config.getboolean('Police', 'Post911', fallback=False),
     "do_police_cases_enabled": config.getboolean('Police', 'DoCases', fallback=False),
     "do_bank_add_clients_enabled": config.getboolean('Bank', 'AddClients', fallback=False) and location == home_city and occupation in ["Bank Teller", "Loan Officer", "Bank Manager"],
-    "do_auto_promo_enabled": config.getboolean('Misc', 'TakePromo', fallback=True) and (next_rank_pct >= 95),
+    "do_auto_promo_enabled": config.getboolean('Misc', 'TakePromo', fallback=True) and ((isinstance(next_rank_pct, (int, float)) and next_rank_pct >= 95) or next_rank_pct is None or (isinstance(next_rank_pct, str) and next_rank_pct.strip().lower() == "unknown")),
 }
 
 def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_configs, next_rank_pc):

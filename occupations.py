@@ -328,17 +328,10 @@ def medical_casework(player_data):
 
     if task_clicked:
         print("SUCCESS: Casework task initiated.")
-        all_timers = get_all_active_game_timers()
-        medical_case_time_remaining = all_timers.get('medical_case_time_remaining', 0)
-        if medical_case_time_remaining > 0:
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=medical_case_time_remaining)
-        else:
-            print("No casework tasks found. Setting fallback cooldown.")
-            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(8, 14))
-        return task_clicked
+        return True
     else:
         print("No casework tasks found. Setting fallback cooldown.")
-        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(8, 14))
+        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 48))
         return False
 
 def engineering_casework(player_data):
@@ -1020,7 +1013,7 @@ def fire_casework(initial_player_data):
             return True
 
     print("No valid fire inspections available. Setting fallback cooldown.")
-    global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
+    global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 48))
     return False
 
 def fire_duties():
