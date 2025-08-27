@@ -61,7 +61,7 @@ except Exception as e:
 
 # --- Global Configurations ---
 EXPLICIT_WAIT_SECONDS = random.uniform(4, 5) # This is a wait for specific elements to appear, preventing TimeoutException when elements load dynamically.
-ACTION_PAUSE_SECONDS = random.uniform(1, 2) # This is an unconditional sleep between actions, primarily for pacing and simulating human interaction.
+ACTION_PAUSE_SECONDS = random.uniform(0.5, 1.5) # This is an unconditional sleep between actions, primarily for pacing and simulating human interaction.
 wait = WebDriverWait(driver, EXPLICIT_WAIT_SECONDS)
 MIN_POLLING_INTERVAL_LOWER = 40
 MIN_POLLING_INTERVAL_UPPER = 80
