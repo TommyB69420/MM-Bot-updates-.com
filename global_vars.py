@@ -65,6 +65,7 @@ ACTION_PAUSE_SECONDS = random.uniform(0.5, 1.5) # This is an unconditional sleep
 wait = WebDriverWait(driver, EXPLICIT_WAIT_SECONDS)
 MIN_POLLING_INTERVAL_LOWER = 40
 MIN_POLLING_INTERVAL_UPPER = 80
+startup_login_ping_sent = False # One time Discord ping on startup (guard)
 
 # Directory for game data and logs
 COOLDOWN_DATA_DIR = 'game_data'
@@ -87,6 +88,7 @@ CUSTOMS_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "customs_training_d
 FIRE_TRAINING_DONE_FILE = os.path.join(COOLDOWN_DATA_DIR, "fire_training_done.json")
 BLIND_EYE_QUEUE_FILE = os.path.join(COOLDOWN_DATA_DIR, "blind_eye_queue.json")
 COMMUNITY_SERVICE_QUEUE_FILE = os.path.join(COOLDOWN_DATA_DIR, "community_service_queue.json")
+DRUGS_LAST_CONSUMED_FILE =  os.path.join(COOLDOWN_DATA_DIR, "drugs_last_consumed.txt")
 
 # Define keys for database (aggravated_crime_cooldowns.json) entries
 MINOR_CRIME_COOLDOWN_KEY = 'minor_crime_cooldown'
@@ -115,6 +117,7 @@ _script_bionics_shop_cooldown_end_time = datetime.datetime.now()
 _script_weapon_shop_cooldown_end_time = datetime.datetime.now()
 _script_drug_store_cooldown_end_time = datetime.datetime.now()
 _script_promo_check_cooldown_end_time = datetime.datetime.now()
+_script_consume_drugs_cooldown_end_time = datetime.datetime.now()
 jail_timers = {}
 
 # Global variable to store the last known unread message and journal count

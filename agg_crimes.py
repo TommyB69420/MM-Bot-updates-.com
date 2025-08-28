@@ -20,13 +20,12 @@ def execute_funeral_parlour_scan():
     initial_url = global_vars.driver.current_url
 
     if not _navigate_to_page_via_menu(
-            "//*[@id='nav_left']/div[3]/a[2]",
-            "//*[@id='city_holder']//a[contains(@class, 'business') and contains(@class, 'funeral_parlour')]",
-            "Funeral Parlour"
-    ):
+            "//span[@class='city']",
+            "//a[@class='business funeral_parlour']",
+            "Funeral Parlour"):
         return False
 
-    closed_message_element = _find_element(By.XPATH, "//*[contains(text(), 'while under going repairs')]", global_vars.EXPLICIT_WAIT_SECONDS)
+    closed_message_element = _get_element_text_quiet(By.XPATH, "//*[contains(text(), 'while under going repairs')]", global_vars.EXPLICIT_WAIT_SECONDS)
 
     if closed_message_element:
         print("Funeral Parlour is currently closed for repairs. Resetting scan timer.")
@@ -35,12 +34,17 @@ def execute_funeral_parlour_scan():
         time.sleep(global_vars.ACTION_PAUSE_SECONDS)
         return True
 
-    if not _find_and_click(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/table/tbody/tr[6]/td/a", pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+    if not _find_and_click(By.XPATH, "//a[normalize-space()='View Daily Obituaries']", pause=global_vars.ACTION_PAUSE_SECONDS * 2):
         return False
 
     obituary_table = _find_element(By.XPATH, "/html/body/div[4]/div[4]/div[1]/div[2]/div/table")
     if not obituary_table:
-        return False
+        # Treat as a successful scan—set normal cooldown via timestamp and exit.
+        print("Obituary table not found; treating as successful scan and setting cooldown.")
+        _set_last_timestamp(global_vars.FUNERAL_PARLOUR_LAST_SCAN_FILE, datetime.datetime.now())
+        global_vars.driver.get(initial_url)
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+        return True
 
     rows = obituary_table.find_elements(By.TAG_NAME, "tr")[1:]
     deceased_players = []

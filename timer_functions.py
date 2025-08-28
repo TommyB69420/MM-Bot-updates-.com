@@ -76,6 +76,7 @@ def get_all_active_game_timers():
         'check_bionics_store_time_remaining': 0,
         'gym_trains_time_remaining': 0,
         'promo_check_time_remaining': 0,
+        'consume_drugs_time_remaining': 0,
 
     }
     current_time = datetime.datetime.now()
@@ -140,6 +141,14 @@ def get_all_active_game_timers():
         timers['check_bionics_store_time_remaining'] = max(0, bios_time_remaining)
     else:
         timers['check_bionics_store_time_remaining'] = 0.0 # If never checked, check immediately
+
+    # Consume Drugs Timer
+    next_consume_drugs = _get_last_timestamp(global_vars.DRUGS_LAST_CONSUMED_FILE)
+    if next_consume_drugs:
+        consume_drugs_time_remaining = (next_consume_drugs - current_time).total_seconds()
+        timers['consume_drugs_time_remaining'] = max(0, consume_drugs_time_remaining)
+    else:
+        timers['consume_drugs_time_remaining'] = 0.0  # If never checked, check immediately
 
     # Post 911 timer
     next_911_post = _get_last_timestamp(global_vars.POLICE_911_NEXT_POST_FILE)
@@ -295,6 +304,11 @@ def get_all_active_game_timers():
     script_weapon_shop_remaining = (global_vars._script_weapon_shop_cooldown_end_time - current_time).total_seconds()
     if script_weapon_shop_remaining > 0:
         timers['check_weapon_shop_time_remaining'] = max(timers.get('check_weapon_shop_time_remaining', 0), script_weapon_shop_remaining)
+
+    # Consume Drugs Cooldown
+    script_consume_drugs_remaining = (global_vars._script_consume_drugs_cooldown_end_time - current_time).total_seconds()
+    if script_consume_drugs_remaining > 0:
+        timers['consume_drugs_time_remaining'] = max(timers.get('consume_drugs_time_remaining', 0),script_consume_drugs_remaining)
 
     # Drug Store Cooldown
     script_drug_store_remaining = (global_vars._script_drug_store_cooldown_end_time - current_time).total_seconds()

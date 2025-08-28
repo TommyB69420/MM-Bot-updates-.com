@@ -10,7 +10,7 @@ import global_vars
 from database_functions import _read_json_file, remove_player_cooldown, set_player_data
 from helper_functions import _find_and_send_keys, _find_and_click, _find_element, _navigate_to_page_via_menu, \
     _get_element_text, _get_element_attribute, _find_elements, _get_current_url, blind_eye_queue_count, \
-    _get_dropdown_options, _select_dropdown_option, dequeue_blind_eye
+    _get_dropdown_options, _select_dropdown_option, dequeue_blind_eye, _find_elements_quiet
 from timer_functions import get_game_timer_remaining, get_all_active_game_timers
 
 
@@ -532,7 +532,8 @@ def lawyer_casework():
     """
     print("\n--- Beginning Lawyer Casework Operation ---")
 
-    court_menu_xpath = "/html/body/div[4]/div[3]/div[6]/a[1]/span"
+    # Navigate to Court page
+    court_menu_xpath = "//span[@class='court']"
     if not _find_and_click(By.XPATH, court_menu_xpath):
         print("FAILED: Navigation to Court menu for Lawyer Cases failed. Setting short cooldown.")
         global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(60, 180))
@@ -543,68 +544,25 @@ def lawyer_casework():
     cases_table_xpath = "/html/body/div[4]/div[4]/div[1]/div[2]/center/form/table"
     cases_table = _find_element(By.XPATH, cases_table_xpath)
 
-    processed_any_case = False
-
     if cases_table:
         case_rows = cases_table.find_elements(By.TAG_NAME, "tr")[1:]
-
         for i, row in enumerate(case_rows):
             try:
-                defend_button_xpath = f".//td[6]/a[@class='box green' and text()='DEFEND']"
-                defend_button = _find_element(By.XPATH, defend_button_xpath, timeout=1)
-
-                if defend_button:
-                    print(f"Found a defendable case. Clicking DEFEND button.")
-                    if _find_and_click(By.XPATH, defend_button_xpath):
-                        print(f"Successfully clicked DEFEND for a lawyer case.")
-                        processed_any_case = True
-
-                        result_text = _get_element_text(By.XPATH, "/html/body/div[4]/div[4]/div[1]")
-                        if result_text:
-                            if "managed to defend" in result_text and "successfully" in result_text:
-                                print(f"Lawyer case successfully defended: {result_text}")
-                                # After successful action, re-read the specific game timer if available
-                                new_game_lawyer_time = get_game_timer_remaining("/html/body/div[4]/div[1]/div/div[6]/form/span[2]")
-                                if new_game_lawyer_time != float('inf') and new_game_lawyer_time > 0:
-                                    global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=new_game_lawyer_time)
-                                else:
-                                    global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(300, 600))
-                            elif "client cannot afford your services" in result_text or "the victim is already dead" in result_text:
-                                print(f"Lawyer case failed (client cannot afford/victim dead): {result_text}")
-                                global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
-                            else:
-                                print(f"Lawyer case defended, but unexpected result: {result_text}")
-                                global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta( seconds=random.uniform(180, 300))
-                        else:
-                            print("No result message after defending lawyer case. Setting default cooldown.")
-                            global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(180, 300))
-
-                        global_vars.driver.get(global_vars.initial_game_url)
-                        time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
-                        return True
-
+                defend_button_xpath = ".//td[6]/a[@class='box green' and text()='DEFEND']"
+                defend_button = _find_elements_quiet(By.XPATH, defend_button_xpath)
+                if defend_button and _find_and_click(By.XPATH, defend_button_xpath):
+                    print("Successfully clicked DEFEND for a lawyer case.")
+                    return True
             except NoSuchElementException:
                 pass
             except Exception as e:
-                print(f"ERROR: Error processing a lawyer case row: {e}. Attempting to return to court page.")
-                try:
-                    global_vars.driver.get("https://mafiamatrix.net/court/court.asp")
-                    time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
-                except Exception as back_e:
-                    print(f"ERROR: Failed to navigate back to court page after error: {back_e}")
-                cases_table = _find_element(By.XPATH, cases_table_xpath)
-                if cases_table:
-                    case_rows = cases_table.find_elements(By.TAG_NAME, "tr")[1:]
-                else:
-                    print("CRITICAL: Lawyer cases table not found even after attempting to navigate back. Exiting lawyer casework for this cycle.")
-                    return False
+                print(f"ERROR: Error processing a lawyer case row: {e}")
 
-    if not processed_any_case:
-        wait_time = random.uniform(180, 300)
-        global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=wait_time)
-        print(f"No suitable lawyer cases found. Next Lawyer Casework check in {wait_time:.2f} seconds.")
-
-    return processed_any_case
+    # No defendable cases found — set standard back-off.
+    wait_time = random.uniform(180, 300)
+    global_vars._script_case_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=wait_time)
+    print(f"No lawyer cases found. Next check in {wait_time:.2f} seconds.")
+    return False
 
 def banker_laundering():
     """

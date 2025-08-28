@@ -18,7 +18,7 @@ from timer_functions import get_all_active_game_timers
 from comms_journals import send_discord_notification, get_unread_message_count, read_and_send_new_messages, get_unread_journal_count, process_unread_journal_entries
 from misc_functions import study_degrees, do_events, check_weapon_shop, check_drug_store, jail_work, \
     clean_money_on_hand_logic, gym_training, check_bionics_shop, police_training, combat_training, fire_training, \
-    customs_training, take_promotion
+    customs_training, take_promotion, consume_drugs
 
 # --- Initialize Local Cooldown Database ---
 if not init_local_db():
@@ -31,45 +31,65 @@ global_vars.initial_game_url = global_vars.driver.current_url
 def fetch_initial_player_data():
     """Fetches and prints initial player data from the game UI."""
     player_data = {}
+
     data_elements = {
-        "Character Name": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Name']/following-sibling::div[1]/a", "is_money": False},
-        "Rank": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Rank']/following-sibling::div[1]", "is_money": False},
-        "Occupation": {"xpath": "//div[@id='nav_right']//div[@id='display_top'][normalize-space(text())='Occupation']/following-sibling::div[@id='display_end']", "is_money": False},
-        "Clean Money": {"xpath": "//div[@id='nav_right']//form[contains(., '$')]", "is_money": True},
-        "Dirty Money": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Dirty money']/following-sibling::div[1]", "is_money": True},
-        "Location": {"xpath": "//div[@id='nav_right']/div[contains(normalize-space(text()), 'Location')]/following-sibling::div[1]", "is_money": False, "strip_label": "Location:"},
-        "Home City": {"xpath": "//div[contains(text(), 'Home City')]/following-sibling::div[1]", "is_money": False, "strip_label": "Home city:"},
-        "Next Rank": {"xpath": "//div[@id='nav_right']//div[@role='progressbar' and contains(@class,'bg-rankprogress')]", "attr": "aria-valuenow", "is_percent": True}
+        "Character Name": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Name']/following-sibling::div[1]/a", "kind": "text"},
+        "Rank": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Rank']/following-sibling::div[1]", "kind": "text"},
+        "Occupation": {"xpath": "//div[@id='nav_right']//div[@id='display_top'][normalize-space(text())='Occupation']/following-sibling::div[@id='display_end']", "kind": "text"},
+        "Clean Money": {"xpath": "//div[@id='nav_right']//form[contains(., '$')]", "kind": "money"},
+        "Dirty Money": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Dirty money']/following-sibling::div[1]", "kind": "money"},
+        "Location": {"xpath": "//div[@id='nav_right']/div[contains(normalize-space(text()), 'Location')]/following-sibling::div[1]", "kind": "text", "strip_label": "Location:"},
+        "Home City": {"xpath": "//div[contains(text(), 'Home City')]/following-sibling::div[1]", "kind": "text", "strip_label": "Home city:"},
+        "Next Rank": {"xpath": "//div[@id='nav_right']//div[@role='progressbar' and contains(@class,'bg-rankprogress')]", "attr": "aria-valuenow", "kind": "percent"},
+        "Consumables 24h": {"xpath": "//div[@id='nav_right']/div[normalize-space(text())='Consumables / 24h']/following-sibling::div[1]", "kind": "int"},
+    }
+
+    # parsers for each kind
+    kind_parsers = {
+        "money":   lambda s: int(''.join(ch for ch in s if ch.isdigit())) if any(ch.isdigit() for ch in s) else 0,
+        "percent": lambda s: int(''.join(ch for ch in s if ch.isdigit())) if any(ch.isdigit() for ch in s) else None,
+        "int":     lambda s: int(''.join(ch for ch in s if ch.isdigit())) if any(ch.isdigit() for ch in s) else 0,
+        "text":    lambda s: s,
     }
 
     for key, details in data_elements.items():
-        raw = None
-
-        # Use attribute if specified
+        # pull raw text or attribute
         if "attr" in details:
             from helper_functions import _get_element_attribute
             raw = _get_element_attribute(By.XPATH, details["xpath"], details["attr"])
         else:
             raw = _get_element_text(By.XPATH, details["xpath"])
 
-        if raw:
-            text_content = raw.strip()
-            if details.get("strip_label"):
-                text_content = text_content.replace(details["strip_label"], "").strip()
-
-            if details.get("is_money"):
-                player_data[key] = int(''.join(filter(str.isdigit, text_content)))
-            elif details.get("is_percent"):
-                # Handle values like "38" or "38%"
-                digits = ''.join(ch for ch in text_content if ch.isdigit())
-                player_data[key] = int(digits) if digits else None
-            else:
-                player_data[key] = text_content
-        else:
+        if not raw:
             print(f"Warning: Could not fetch {key}.")
             player_data[key] = None
+            continue
+
+        text_content = raw.strip()
+        if details.get("strip_label"):
+            text_content = text_content.replace(details["strip_label"], "").strip()
+
+        kind = details.get("kind", "text")
+        player_data[key] = kind_parsers.get(kind, kind_parsers["text"])(text_content)
 
     return player_data
+
+def message_discord_on_startup():
+    """On process start (and first loop or two), if we're already in-game,
+    send the 'Script started for character: …' Discord message once."""
+    if getattr(global_vars, "startup_login_ping_sent", False):
+        return
+
+    try:
+        # If we're actually in-game, this should succeed:
+        initial_player_data = fetch_initial_player_data()
+        character_name = initial_player_data.get("Character Name", "UNKNOWN")
+        if character_name and character_name != "UNKNOWN":
+            send_discord_notification(f"Script started for character: {character_name}")
+            setattr(global_vars, "startup_login_ping_sent", True)
+    except Exception as e:
+        # Not in-game yet (or DOM not ready) — totally fine; we'll try again later.
+        print(f"Startup ping not sent yet (HUD not ready): {e}")
 
 def check_for_logout_and_login():
     """
@@ -111,17 +131,9 @@ def check_for_logout_and_login():
         # Wait briefly then check URL
         time.sleep(2)
         if "default.asp" not in (global_vars.driver.current_url or "").lower():
-            if _find_and_click(By.XPATH, "//a[@title='Log in with the character!|Get inside the world of MafiaMatrix!']",
-                               pause=global_vars.ACTION_PAUSE_SECONDS * 3):
+            if _find_and_click(By.XPATH, "//a[@title='Log in with the character!|Get inside the world of MafiaMatrix!']", pause=global_vars.ACTION_PAUSE_SECONDS * 3):
                 print("Successfully logged in.")
                 send_discord_notification("Logged in successfully!")
-                try:
-                    initial_player_data = fetch_initial_player_data()
-                    character_name = initial_player_data.get("Character Name", "UNKNOWN")
-                    msg = f"Script started for character: {character_name}"
-                    send_discord_notification(msg)
-                except Exception as e:
-                    print(f"WARNING: Could not send startup login notification: {e}")
 
             else:
                 print("Logged in, but Play Now click failed.")
@@ -184,7 +196,8 @@ def get_enabled_configs(location):
     "do_police_cases_enabled": config.getboolean('Police', 'DoCases', fallback=False),
     "do_bank_add_clients_enabled": config.getboolean('Bank', 'AddClients', fallback=False) and location == home_city and occupation in ["Bank Teller", "Loan Officer", "Bank Manager"],
     "do_auto_promo_enabled": config.getboolean('Misc', 'TakePromo', fallback=True) and ((isinstance(next_rank_pct, (int, float)) and next_rank_pct >= 95) or next_rank_pct is None or (isinstance(next_rank_pct, str) and next_rank_pct.strip().lower() == "unknown")),
-}
+    "do_consume_drugs_enabled": config.getboolean('Drugs', 'ConsumeCocaine', fallback=False) and location == home_city,
+    }
 
 def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_configs, next_rank_pc):
     """
@@ -218,6 +231,7 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
     post_911 = get_timer('post_911_time_remaining')
     trafficking = get_timer('trafficking_time_remaining')
     auto_promo = get_timer('promo_check_time_remaining')
+    consume_drugs = get_timer('consume_drugs_time_remaining')
 
     cfg = global_vars.config
     businesses = global_vars.private_businesses
@@ -241,6 +255,8 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
         active.append(('Training', action))
     if enabled_configs.get('do_auto_promo_enabled'):
         active.append(('Auto Promo', auto_promo))
+    if enabled_configs.get('do_consume_drugs_enabled'):
+        active.append(('Consume Drugs', consume_drugs))
     active.append(('Yellow Pages Scan', yps))
     active.append(('Funeral Parlour Scan', fps))
 
@@ -295,7 +311,7 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
     if cfg.getboolean('Bionics Shop', 'CheckBionicsShop', fallback=False) and any("Bionics" in b for c, b in businesses.items() if c == location):
         active.append(('Check Bionics Shop', bionics))
 
-    print("\n--- Timers Under Consideration for Sleep Duration ---")
+    print("--- Timers Under Consideration for Sleep Duration ---")
     for name, timer_val in active:
         print(f"  {name}: {timer_val:.2f} seconds")
     print("----------------------------------------------------")
@@ -395,6 +411,7 @@ while True:
     # Fetch the player data
     initial_player_data = fetch_initial_player_data()
     character_name = initial_player_data.get("Character Name", "UNKNOWN")
+    message_discord_on_startup()
 
     # --- Jail Check ---
     if is_player_in_jail():
@@ -426,7 +443,8 @@ while True:
     location = initial_player_data.get("Location")
     home_city = initial_player_data.get("Home City")
     next_rank_pct = initial_player_data.get("Next Rank")
-    print(f"Current Character: {character_name}, Rank: {rank}, Occupation: {occupation}, Clean Money: {clean_money}, Dirty Money: {dirty_money}, Location: {location}. Home City: {home_city}. Next Rank {next_rank_pct}.")
+    Consumables = initial_player_data.get("Consumables 24h")
+    print(f"\nCurrent Character: {character_name}, Rank: {rank}, Occupation: {occupation}\nClean Money: {clean_money}, Dirty Money: {dirty_money}\nLocation: {location}. Home City: {home_city}. Next Rank: {next_rank_pct}. Consumables 24h: {Consumables}\n")
 
     # Read enabled configs.
     enabled_configs = get_enabled_configs(location)
@@ -461,6 +479,7 @@ while True:
     gym_trains_time_remaining = all_timers.get('gym_trains_time_remaining', float('inf'))
     check_bionics_store_time_remaining = all_timers.get('check_bionics_store_time_remaining', float('inf'))
     promo_check_time_remaining = all_timers.get('promo_check_time_remaining', float('inf'))
+    consume_drugs_time_remaining = all_timers.get('consume_drugs_time_remaining', float('inf'))
 
     # Career specific timers
     bank_add_clients_time_remaining = all_timers.get('bank_add_clients_time_remaining', float('inf'))
@@ -662,6 +681,12 @@ while True:
     if enabled_configs['do_weapon_shop_check_enabled'] and check_weapon_shop_time_remaining <= 0:
         print(f"Weapon Shop timer ({check_weapon_shop_time_remaining:.2f}s) is ready. Attempting check now.")
         if check_weapon_shop(initial_player_data):
+            action_performed_in_cycle = True
+
+    # Do Consume Drugs Logic
+    if enabled_configs.get('do_consume_drugs_enabled') and consume_drugs_time_remaining <= 0:
+        print(f"Consume Drugs timer ({consume_drugs_time_remaining:.2f}s) is ready. Attempting consume/earn loop now.")
+        if consume_drugs():
             action_performed_in_cycle = True
 
     if perform_critical_checks(character_name):

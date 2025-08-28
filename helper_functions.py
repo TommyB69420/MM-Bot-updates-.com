@@ -49,6 +49,15 @@ def _find_elements(by_type, value, timeout=EXPLICIT_WAIT_SECONDS):
         print(f"An error occurred while finding elements {by_type}: {value} - {e}")
         return []
 
+def _find_elements_quiet(by_type, value):
+    """Finds multiple elements quickly, without waiting or logging."""
+    try:
+        elements = driver.find_elements(by_type, value)
+        return [elem for elem in elements if elem.is_displayed()]
+    except Exception:
+        return []
+
+
 def _find_and_click(by_type, value, timeout=EXPLICIT_WAIT_SECONDS, pause=ACTION_PAUSE_SECONDS):
     """Finds and clicks an element."""
     element = _find_element(by_type, value, timeout)
