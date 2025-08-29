@@ -408,8 +408,8 @@ def judge_casework(player_data):
     print("\n--- Beginning Judge Casework Operation ---")
 
     if not _navigate_to_page_via_menu(
-            "/html/body/div[4]/div[3]/div[6]/a[1]/span",
-            "/html/body/div[4]/div[4]/div[1]/div[2]/div/a[1]/strong",
+            "//span[@class='court']",
+            "//strong[normalize-space()='Assign sentences to pending cases']",
             "Judge Page"
     ):
         print("FAILED: Navigation to Judge Cases Page failed.")
@@ -447,22 +447,16 @@ def judge_casework(player_data):
             row.find_element(By.XPATH, ".//td[5]/input[@type='radio']").click()
             time.sleep(global_vars.ACTION_PAUSE_SECONDS)
 
-            if not _find_and_click(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form/p/input",
-                                   pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+            if not _find_and_click(By.XPATH, "//input[@name='B1']"):
                 continue
 
-            crime_committed = _get_element_text(
-                By.XPATH, "/html/body/div[4]/div[4]/div[3]/div/table/tbody/tr[1]/td[4]"
-            )
+            crime_committed = _get_element_text(By.XPATH, "/html/body/div[4]/div[4]/div[3]/div/table/tbody/tr[1]/td[4]")
             if not crime_committed:
                 global_vars.driver.get("javascript:history.go(-2)")
                 time.sleep(global_vars.ACTION_PAUSE_SECONDS * 2)
                 continue
 
-            if not _find_and_click(
-                By.XPATH, "/html/body/div[4]/div[4]/div[3]/div/center/form[1]/p[2]/input",
-                pause=global_vars.ACTION_PAUSE_SECONDS * 2
-            ):
+            if not _find_and_click(By.XPATH, "//input[@value='Submit']"):
                 continue
 
             if process_judge_case_verdict(crime_committed, player_data['Character Name']):
@@ -485,19 +479,18 @@ def judge_casework(player_data):
 
     return False
 
-
 def process_judge_case_verdict(crime_committed, character_name):
     """Applies fine, sets no community service/jail time, and submits verdict."""
     fine_amount = global_vars.config.getint('Judge', crime_committed, fallback=1000)
     if fine_amount == 1000:
         print(f"Warning: Fine amount for crime '{crime_committed}' not found or invalid in settings.ini. Defaulting to 1000.")
 
-    if not _find_and_send_keys(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div/center/form/p[3]/input", str(fine_amount)):
+    if not _find_and_send_keys(By.XPATH, "//input[@name='fine']", str(fine_amount)):
         return False
     if not _find_and_click(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div/center/form/p[4]/select/option[2]"):
         return False
 
-    jail_time_dropdown = _find_element(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div/center/form/p[5]/select")
+    jail_time_dropdown = _find_element(By.XPATH, "//select[@name='sentence']")
     if jail_time_dropdown:
         try:
             no_jail_time_option = jail_time_dropdown.find_element(By.XPATH, "./option[2]")
@@ -521,7 +514,7 @@ def process_judge_case_verdict(crime_committed, character_name):
     else:
         return False
 
-    if not _find_and_click(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div/center/form/p[6]/input", pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+    if not _find_and_click(By.XPATH, "//input[@name='B1']"):
         return False
     return True
 
