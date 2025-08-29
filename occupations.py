@@ -417,7 +417,7 @@ def judge_casework(player_data):
 
     print("Successfully navigated to Judge Cases Page. Checking for cases...")
 
-    cases_table = _find_elements_quiet(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form/table")
+    cases_table = _find_element(By.XPATH, "/html/body/div[4]/div[4]/div[2]/div[2]/form/table")
     if not cases_table:
         cooldown = random.uniform(60, 120)
         print(f"FAILED: No cases table found. Setting cooldown of {cooldown:.2f} seconds.")
