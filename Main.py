@@ -6,7 +6,7 @@ from selenium.common import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 import global_vars
 from agg_crimes import execute_aggravated_crime_logic, execute_yellow_pages_scan, execute_funeral_parlour_scan
-from earn_functions import execute_earns_logic
+from earn_functions import execute_earns_logic, diligent_worker
 from occupations import judge_casework, lawyer_casework, medical_casework, community_services, laundering, \
     manufacture_drugs, banker_laundering, banker_add_clients, fire_casework, fire_duties, engineering_casework, \
     customs_blind_eyes
@@ -174,6 +174,7 @@ def get_enabled_configs(location):
     config = global_vars.config
     return {
     "do_earns_enabled": config.getboolean('Earns Settings', 'DoEarns', fallback=True),
+    "do_diligent_worker_enabled": config.getboolean('Earns Settings', 'UseDilly', fallback=False),
     "do_community_services_enabled": config.getboolean('Actions Settings', 'CommunityService', fallback=False),
     "mins_between_aggs": config.getint('Misc', 'MinsBetweenAggs', fallback=30),
     "do_hack_enabled": config.getboolean('Hack', 'DoHack', fallback=False),
@@ -218,6 +219,7 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
     launder = get_timer('launder_time_remaining')
     case = get_timer('case_time_remaining')
     event = get_timer('event_time_remaining')
+    skill = get_timer('skill_time_remaining')
     bank_add = get_timer('bank_add_clients_time_remaining')
     aggro = get_timer('aggravated_crime_time_remaining')
     rob_recheck = get_timer('armed_robbery_recheck_time_remaining')
@@ -241,6 +243,8 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
     # Add timers if enabled
     if cfg.getboolean('Earns Settings', 'DoEarns', fallback=False):
         active.append(('Earn', earn))
+    if cfg.getboolean('Earns Settings', 'UseDilly', fallback=False):
+        active.append(('Diligent Worker', skill))
     if cfg.getboolean('Actions Settings', 'CommunityService', fallback=False):
         active.append(('Community Service', action))
     if cfg.getboolean('Actions Settings', 'StudyDegrees', fallback=False) and location == home_city:
@@ -465,6 +469,7 @@ while True:
     launder_time_remaining = all_timers.get('launder_time_remaining', float('inf'))
     event_time_remaining = all_timers.get('event_time_remaining', float('inf'))
     trafficking_time_remaining = all_timers.get('trafficking_time_remaining', float('inf'))
+    skill_time_remaining = all_timers.get('skill_time_remaining', float('inf'))
 
     # Aggravated crime timers
     aggravated_crime_time_remaining = all_timers.get('aggravated_crime_time_remaining', float('inf'))
@@ -496,6 +501,14 @@ while True:
 
     if perform_critical_checks(character_name):
         continue
+
+    # Diligent Worker Logic
+    if enabled_configs['do_diligent_worker_enabled'] and skill_time_remaining <= 0:
+        print(f"Skill timer ({skill_time_remaining:.2f}s) is ready. Attempting Diligent Worker.")
+        if diligent_worker(character_name, which_player=None):
+            action_performed_in_cycle = True
+        else:
+            print("Dilligent Worker logic did not perform an action or failed. Setting fallback cooldown.")
 
     # Earn logic
     if enabled_configs['do_earns_enabled'] and earn_time_remaining <= 0:

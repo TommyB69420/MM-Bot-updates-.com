@@ -5,7 +5,8 @@ from selenium.webdriver.common.by import By
 
 import global_vars
 from global_vars import ACTION_PAUSE_SECONDS, config
-from helper_functions import _find_and_click, _find_element, _navigate_to_page_via_menu
+from helper_functions import _find_and_click, _find_element, _navigate_to_page_via_menu, _find_and_send_keys
+
 
 def _perform_earn_action(earn_name):
     """Clicks a specific earn option and then the 'Work' button."""
@@ -57,16 +58,15 @@ def execute_earns_logic():
     if not _navigate_to_page_via_menu(
             "//*[@id='nav_left']/p[5]/a[1]/span",
             "//*[@id='admintoolstable']/tbody/tr[1]/td/a",
-            "Earns Page"
-    ):
+            "Earns Page"):
         print("FAILED: Failed to open Earns menu.")
-        _script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+        global_vars._script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
     which_earn = config['Earns Settings'].get('WhichEarn')
     if not which_earn:
         print("ERROR: 'WhichEarn' setting not found in settings.ini under [Earns Settings].")
-        _script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+        global_vars._script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
     earns_holder_element = _find_element(By.XPATH, "//*[@id='content']/div[@id='earns_holder']/div[@id='holder_content']")
@@ -97,7 +97,7 @@ def execute_earns_logic():
     # Perform the selected earn
     if not _perform_earn_action(final_earn_to_click):
         print(f"FAILED: Could not perform earn '{final_earn_to_click}'.")
-        _script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+        global_vars._script_earn_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
         return False
 
     print(f"Earn action '{final_earn_to_click}' completed.")
@@ -105,3 +105,56 @@ def execute_earns_logic():
         setattr(global_vars, "force_reselect_earn", False)
         print("Post-promotion: earn reselected successfully; flag cleared.")
     return True
+
+def diligent_worker(character_name, which_player=None):
+    """Manages the Diligent Worker operation: open page, choose target, perform action."""
+
+    print("\n--- Beginning Diligent Worker Operation ---")
+
+    try:
+        print("Navigating to Character Skills...")
+        if not _navigate_to_page_via_menu(
+            "//span[@class='income']",
+            "//a[normalize-space()='Character Skills']",
+            "Character Skills"):
+            print("FAILED: Failed to open Character Skills menu.")
+            global_vars._script_skill_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
+        print("Successfully navigated to Character Skills.")
+
+        # Read from Earns Settings - UseDillyOn
+        try:
+            cfg_val = global_vars.config.get('Earns Settings', 'UseDillyOn', fallback="").strip()
+        except Exception:
+            cfg_val = ""
+
+        target = (which_player or cfg_val or (character_name if character_name and character_name != "UNKNOWN" else "")).strip()
+        if not target:
+            print("ERROR: No target name available (argument, config, and character_name are all empty).")
+            global_vars._script_skill_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
+        if not which_player and not cfg_val:
+            print(f"UseDillyOn is blank. Falling back to own character name: {target}")
+
+        # Enter the player name into the textbox (helper will clear and send keys)
+        textbox_xpath = "//*[@id='content']/form[1]/table/tfoot/tr[2]/td[1]/input"
+        if not _find_and_send_keys(By.XPATH, textbox_xpath, target):
+            print("FAILED: Diligent Worker textbox not found or not writable.")
+            global_vars._script_skill_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
+
+        # Click the Motivate! button
+        button_xpath = "//*[@id='content']/form[1]/table/tfoot/tr[2]/td[2]/input"
+        if not _find_and_click(By.XPATH, button_xpath):
+            print(f"FAILED: Could not click 'Motivate!' for '{target}'.")
+            global_vars._script_skill_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+            return False
+
+        print(f"Diligent Worker completed for '{target}'.")
+
+        return True
+
+    except Exception as e:
+        print(f"ERROR during Diligent Worker flow: {e!r}")
+        global_vars._script_skill_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
+        return False

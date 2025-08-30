@@ -61,6 +61,7 @@ def get_all_active_game_timers():
         'launder_time_remaining': 0,
         'trafficking_time_remaining': 0,
         'event_time_remaining': 0,
+        'skill_time_remaining': 0,
 
         'bank_add_clients_time_remaining': 0,
         'post_911_time_remaining': 0,
@@ -90,6 +91,7 @@ def get_all_active_game_timers():
         'launder_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Launder')]/form/span[@class='donation_timer']",
         'trafficking_time_remaining': "//div[@id='user_timers_holder']/div/form[@name='traffick']/span[@class='donation_timer']",
         'event_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Event action')]/form/span[@class='donation_timer']",
+        'skill_time_remaining': "//div[@id='user_timers_holder']/div[contains(@title, 'Next Skill')]/form/span[@class='donation_timer']",
     }
 
     for timer_name, xpath in timer_xpaths.items():
@@ -264,6 +266,11 @@ def get_all_active_game_timers():
     script_community_service_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()
     if script_community_service_remaining > 0:
         timers['action_time_remaining'] = max(timers.get('action_time_remaining', 0), script_community_service_remaining)
+
+    # Diligent Worker Cooldown
+    script_diligent_worker_remaining = (global_vars._script_skill_cooldown_end_time - current_time).total_seconds()
+    if script_diligent_worker_remaining > 0:
+            timers['skill_time_remaining'] = max(timers.get('skill_time_remaining', 0), script_diligent_worker_remaining)
 
     # FireFighter Duties Cooldown
     script_firefighter_remaining = (global_vars._script_action_cooldown_end_time - current_time).total_seconds()

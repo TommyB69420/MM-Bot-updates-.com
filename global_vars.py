@@ -103,6 +103,7 @@ _script_launder_cooldown_end_time = datetime.datetime.now()
 _script_case_cooldown_end_time = datetime.datetime.now()
 _script_trafficking_cooldown_end_time = datetime.datetime.now()
 _script_event_cooldown_end_time = datetime.datetime.now()
+_script_skill_cooldown_end_time = datetime.datetime.now()
 # Career-specific timers
 _script_bank_add_clients_cooldown_end_time = datetime.datetime.now()
 _script_post_911_cooldown_end_time = datetime.datetime.min

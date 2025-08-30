@@ -3,12 +3,10 @@ import os
 import random
 import time
 import re
-import sys
 from selenium.common import NoSuchElementException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
 import global_vars
 from comms_journals import send_discord_notification
-from earn_functions import execute_earns_logic
 from helper_functions import _find_and_click, _find_element, _navigate_to_page_via_menu, _get_element_text, _get_dropdown_options, _select_dropdown_option, _find_and_send_keys, _get_current_url
 from database_functions import set_all_degrees_status, get_all_degrees_status, _set_last_timestamp, _read_json_file, _write_json_file
 from timer_functions import get_all_active_game_timers
@@ -31,8 +29,7 @@ def study_degrees():
     if not _navigate_to_page_via_menu(
             "//*[@id='nav_left']/div[3]/a[2]", # Click the city page
             "//*[@id='city_holder']//a[contains(@class, 'business') and contains(@class, 'university')]", # Click University
-            "University"
-    ):
+            "University"):
         print("FAILED: Failed to navigate to University Degree page.")
         # Set a cooldown before retrying, as navigation failed
         global_vars._script_action_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(30, 90))
