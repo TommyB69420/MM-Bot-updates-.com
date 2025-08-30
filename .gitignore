@@ -9,3 +9,4 @@ __pycache__/
 # Logs and databases
 *.log
 *.db
+*.bat
