@@ -1,13 +1,7 @@
 import json
-import time
-import re
 import requests
-from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
-from helper_functions import _find_element, _find_elements, _find_and_click, _get_element_text, \
-    _navigate_to_page_via_menu, _select_dropdown_option, enqueue_blind_eyes
-import global_vars
-from helper_functions import _find_element, _find_and_click, _get_element_text
+from helper_functions import _navigate_to_page_via_menu, _select_dropdown_option, enqueue_blind_eyes
 import math
 
 _PROCESSED_RO_KEYS = set()
@@ -302,6 +296,7 @@ def _process_requests_offers_entries():
             # Handle offers (these will refresh the DOM)
             accept_lawyer_rep(entry_content)
             accept_blind_eye_offer(entry_content)
+            accept_drug_smuggle(entry_content)
 
             # Only send once per *function call*
             key = f"{entry_time}|{entry_title}|{entry_content}".strip()
@@ -534,12 +529,27 @@ def accept_blind_eye_offer(entry_content: str):
             print("Detected Blind Eye Offer. Attempting to accept it...")
             if _find_and_click(By.XPATH, "//a[normalize-space()='ACCEPT']", pause=global_vars.ACTION_PAUSE_SECONDS):
                 enqueue_blind_eyes(1)
+                send_discord_notification("Accepted a Blind Eye offer and queued it.")
                 print("Successfully accepted Blind Eye offer and queued it.")
             else:
                 print("FAILED to click ACCEPT for Blind Eye offer.")
     except Exception as e:
         print(f"Exception during blind eye acceptance attempt: {e}")
 
+def accept_drug_smuggle(entry_content):
+    """
+    If entry_content contains 'inside a dead body', attempts to click ACCEPT.
+    """
+    try:
+        if "inside of a dead body" in entry_content.lower():
+            print("Detected 'dead body' offer. Attempting to accept it...")
+            if _find_and_click(By.XPATH, "//a[normalize-space()='ACCEPT']", pause=global_vars.ACTION_PAUSE_SECONDS):
+                send_discord_notification("Accepted Drug Smuggle. Send this manually when requested by player")
+                print("Successfully accepted 'dead body' offer.")
+            else:
+                print("FAILED to click ACCEPT for 'dead body' offer.")
+    except Exception as e:
+        print(f"Exception during dead body acceptance attempt: {e}")
 
 def check_into_hospital_for_surgery():
     """
@@ -555,8 +565,7 @@ def check_into_hospital_for_surgery():
     if not _navigate_to_page_via_menu(
             "//span[@class='city']",
             "//a[@class='business hospital']",
-            "Hospital"
-    ):
+            "Hospital"):
         print("FAILED: Could not navigate to Hospital.")
         return False
 
@@ -775,3 +784,194 @@ def drug_offers(initial_player_data: dict):
         _find_and_click(By.XPATH, "//a[normalize-space()='DECLINE']", pause=global_vars.ACTION_PAUSE_SECONDS)
         _back_to_journal()
         return True
+
+
+# ======================
+# Reply-to-sender helpers
+# ======================
+
+import re
+import time
+from selenium.webdriver.common.by import By
+from helper_functions import _find_element, _find_elements, _find_and_click, _get_element_text
+import global_vars
+
+# --- XPaths you already use / confirmed ---
+# Comms button to open the list page
+COMMS_BUTTON_XPATH = "//span[@id='comms_span_id']"
+
+# Sender inside an OPEN conversation (header area)
+CONVO_SENDER_XPATH = ".//*[@id='conversation_holder']/div[1]/table/tbody/tr/td/div[1]/div[1]/div/a[2]"
+
+# Reply box + Send Reply button (inside an OPEN conversation)
+REPLY_BOX_XPATH = "//*[@id='holder_content']/p[1]/textarea"
+SEND_BTN_XPATH = "//*[@id='holder_content']/p[2]/input"
+
+
+def _normalize_name(s: str) -> str:
+    """Normalize a player name for comparison (case/space insensitive)."""
+    return re.sub(r"\s+", " ", (s or "")).strip().lower()
+
+
+def open_comms() -> bool:
+    """Click the Comms button to go to the Communications page."""
+    return _find_and_click(By.XPATH, COMMS_BUTTON_XPATH, pause=global_vars.ACTION_PAUSE_SECONDS)
+
+
+def _thread_container_xpath(i: int) -> str:
+    """The outer container for the i-th thread block on the list page."""
+    return f"//*[@id='comms_holder']/form/div[{i}]"
+
+
+def _thread_contentbox_xpath(i: int) -> str:
+    """Preferred clickable area that opens the conversation (col 3 content)."""
+    # Example given for first: //*[@id="comms_holder"]/form/div[1]/table/tbody/tr/td[3]/a/div
+    return f"//*[@id='comms_holder']/form/div[{i}]/table/tbody/tr/td[3]/a/div"
+
+
+def _thread_any_clickable_in_td3_xpath(i: int) -> str:
+    """Fallback: any anchor under third column if exact contentbox path fails."""
+    return f"//*[@id='comms_holder']/form/div[{i}]/table/tbody/tr/td[3]//a"
+
+
+def find_and_open_thread_on_list(target_name: str, max_threads: int = 50) -> bool:
+    """
+    On the list page, loop visible thread blocks, read each block's text,
+    and open the one containing `target_name` (case-insensitive). Then return True.
+    """
+    if not open_comms():
+        print("[find_and_open_thread_on_list] Failed to open comms.")
+        return False
+
+    norm_target = _normalize_name(target_name)
+    print(f"[find_and_open_thread_on_list] Scanning list for: '{norm_target}'")
+
+    for i in range(1, max_threads + 1):
+        container_xpath = _thread_container_xpath(i)
+        container = _find_element(By.XPATH, container_xpath, timeout=1, suppress_logging=True)
+        if not container:
+            if i == 1:
+                print("[find_and_open_thread_on_list] No threads found on page.")
+            else:
+                print(f"[find_and_open_thread_on_list] End of list at index {i}.")
+            break
+
+        # Grab the full visible text of this thread block for robust matching
+        try:
+            block_text = global_vars.driver.execute_script(
+                "return arguments[0].innerText || arguments[0].textContent || '';", container
+            )
+        except Exception:
+            block_text = container.text or ""
+        norm_block = _normalize_name(block_text)
+
+        if norm_target in norm_block:
+            print(f"[find_and_open_thread_on_list] Match in thread {i}. Opening via content box…")
+
+            # Preferred click: content box in td[3]
+            contentbox_xpath = _thread_contentbox_xpath(i)
+            if _find_and_click(By.XPATH, contentbox_xpath, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+                return True
+
+            print(f"[find_and_open_thread_on_list] Content box click failed for {i}, trying fallback…")
+
+            # Fallback: any anchor in td[3]
+            fallback_xpath = _thread_any_clickable_in_td3_xpath(i)
+            if _find_and_click(By.XPATH, fallback_xpath, pause=global_vars.ACTION_PAUSE_SECONDS):
+                return True
+
+            print(f"[find_and_open_thread_on_list] Fallback click failed for block {i}.")
+            return False
+
+    print("[find_and_open_thread_on_list] Target not present in current list.")
+    return False
+
+
+def send_in_game_reply(body: str) -> bool:
+    """Types `body` into the reply box and clicks Send Reply in the open conversation."""
+    try:
+        reply_box = _find_element(By.XPATH, REPLY_BOX_XPATH, timeout=5)
+        if not reply_box:
+            print("[send_in_game_reply] Reply textarea not found.")
+            return False
+
+        reply_box.clear()
+        reply_box.send_keys(body)
+
+        if not _find_and_click(By.XPATH, SEND_BTN_XPATH, pause=global_vars.ACTION_PAUSE_SECONDS):
+            print("[send_in_game_reply] Send button click failed.")
+            return False
+
+        time.sleep(0.5)
+        print(f"[send_in_game_reply] Sent reply: {body}")
+        return True
+    except Exception as e:
+        print(f"[send_in_game_reply] Error: {e}")
+        return False
+
+def _legacy_open_by_header(target_name: str, max_threads: int = 30) -> bool:
+    """
+    Legacy fallback: click each thread link (td[3]) and compare the header sender inside the open conversation.
+    """
+    if not open_comms():
+        return False
+
+    norm_target = _normalize_name(target_name)
+
+    for i in range(1, max_threads + 1):
+        # Click the content box in td[3] to open thread i
+        link_xpath = _thread_contentbox_xpath(i)
+        link_el = _find_element(By.XPATH, link_xpath, timeout=1, suppress_logging=True)
+        if not link_el:
+            break
+
+        if not _find_and_click(By.XPATH, link_xpath, pause=global_vars.ACTION_PAUSE_SECONDS * 2):
+            continue
+
+        header_sender = _get_element_text(By.XPATH, CONVO_SENDER_XPATH, timeout=3) or ""
+        if _normalize_name(header_sender) == norm_target:
+            return True
+
+        # Not a match; go back to the list and continue
+        try:
+            global_vars.driver.back()
+            time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+        except Exception as e:
+            print(f"[_legacy_open_by_header] Back navigation failed: {e}")
+            open_comms()
+
+    return False
+
+def reply_to_sender(sender: str, body: str) -> bool:
+    """
+    Full flow:
+      1) Open comms list, scan for `sender`, click the conversation content box
+      2) Send reply `body`
+      3) Fallback: open each thread and check header sender if list scan didn't match
+    """
+    # Primary: list-page text scan + click content box
+    if find_and_open_thread_on_list(sender):
+        return send_in_game_reply(body)
+
+    # Fallback: open each thread and compare header sender
+    if _legacy_open_by_header(sender):
+        return send_in_game_reply(body)
+
+    print("[reply_to_sender] Could not locate sender in list or header.")
+    return False
+
+def _clean_amount(amount_str: str) -> int | None:
+    """
+    Accepts '100000', '100,000', '$100,000' etc. Returns int or None if invalid/<=0.
+    """
+    if amount_str is None:
+        return None
+    s = str(amount_str).strip()
+    s = re.sub(r"[^\d]", "", s)  # keep digits only
+    if not s:
+        return None
+    try:
+        val = int(s)
+        return val if val > 0 else None
+    except Exception:
+        return None

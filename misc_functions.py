@@ -6,7 +6,7 @@ import re
 from selenium.common import NoSuchElementException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
 import global_vars
-from comms_journals import send_discord_notification
+from comms_journals import send_discord_notification, _clean_amount
 from helper_functions import _find_and_click, _find_element, _navigate_to_page_via_menu, _get_element_text, _get_dropdown_options, _select_dropdown_option, _find_and_send_keys, _get_current_url
 from database_functions import set_all_degrees_status, get_all_degrees_status, _set_last_timestamp, _read_json_file, _write_json_file
 from timer_functions import get_all_active_game_timers
@@ -1422,3 +1422,78 @@ def consume_drugs():
 
     print("Did not reach configured ConsumeLimit; no timestamp written.")
     return False
+
+def execute_sendmoney_to_player(target_player: str, amount_str: str) -> bool:
+    try:
+        target_player = (target_player or "").strip()
+        amt = _clean_amount(amount_str)
+
+        if not target_player:
+            print("Incorrect player name for transfer")
+            return False
+        if amt is None:
+            print("You have insufficient funds")  # or "Invalid amount"; using provided phrasing constraints
+            return False
+
+        # 1) Navigate to Bank
+        if not _navigate_to_page_via_menu(
+                "//span[@class='income']",
+                "//a[normalize-space()='Bank']",
+                "Bank"):
+            print("FAILED: Could not open Bank.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+        # Click Transfers tab
+        if not _find_and_click(By.XPATH, "//a[normalize-space()='Transfers']", pause=global_vars.ACTION_PAUSE_SECONDS):
+            print("FAILED: Could not open Bank Transfers.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS / 2)
+
+        # Fill amount & player
+        amount_xpath = "//input[@name='transferamount']"
+        name_xpath = "//input[@name='transfername']"
+        transfer_btn_xpath = "//input[@id='B1']"
+
+        amount_el = _find_element(By.XPATH, amount_xpath, timeout=5)
+        name_el = _find_element(By.XPATH, name_xpath, timeout=5)
+        if not amount_el or not name_el:
+            print("FAILED: Transfer inputs not found.")
+            return False
+
+        # Clear and type
+        if not _find_and_send_keys(By.XPATH, amount_xpath, str(amt)):
+            print("FAILED: Could not enter transfer amount.")
+            return False
+
+        if not _find_and_send_keys(By.XPATH, name_xpath, target_player):
+            print("FAILED: Could not enter recipient name.")
+            return False
+
+        # Click Transfer
+        if not _find_and_click(By.XPATH, transfer_btn_xpath):
+            print("FAILED: Could not click Transfer.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+        # Fail checks on the result page
+        src = (global_vars.driver.page_source or "")
+
+        if "You have entered an incorrect name!" in src:
+            print("Incorrect player name for transfer")
+            return False
+
+        if "You have insufficient funds to complete this transfer!" in src:
+            print("You have insufficient funds")
+            return False
+
+        # If we reach here, assume success (no explicit success text provided)
+        print(f"Transfer completed: ${amt:,} to '{target_player}'.")
+        return True
+
+    except Exception as e:
+        print(f"ERROR during sendmoney flow: {e}")
+        return False

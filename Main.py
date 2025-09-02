@@ -5,6 +5,7 @@ import sys
 from selenium.common import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 import global_vars
+from discord_bridge import start_discord_bridge
 from agg_crimes import execute_aggravated_crime_logic, execute_yellow_pages_scan, execute_funeral_parlour_scan
 from earn_functions import execute_earns_logic, diligent_worker
 from occupations import judge_casework, lawyer_casework, medical_casework, community_services, laundering, \
@@ -279,7 +280,7 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
             active += [('Torch (Re-check)', torch_recheck), ('Torch (General)', aggro)]
 
     # Career specific based on occupation
-    if cfg.getboolean('Judge', 'Do_Cases', fallback=False):
+    if enabled_configs['do_judge_cases_enabled']:
         active.append(('Judge Casework', case))
     if occupation == "Lawyer":
         active.append(('Lawyer Casework', case))
@@ -349,6 +350,9 @@ def _determine_sleep_duration(action_performed_in_cycle, timers_data, enabled_co
     print(f"Decision: {sleep_reason}")
     return sleep_duration
 
+# --- Start Discord Bridge ---
+start_discord_bridge()
+print("[Main] Discord bridge started.")
 
     # --- SCRIPT CHECK DETECTION & LOGOUT/LOGIN ---
 def perform_critical_checks(character_name):
@@ -356,48 +360,61 @@ def perform_critical_checks(character_name):
     Fast, non-blocking check for logout and script check pages.
     Uses instant checks with no WebDriverWait.
     """
-    # Check for logout
-    if "default.asp" in global_vars.driver.current_url.lower():
-        print("Logged out. Attempting login...")
-        if check_for_logout_and_login():
-            global_vars.initial_game_url = global_vars.driver.current_url
-            return True  # Restart the main loop after re-login
+    # Ensure critical probes & any quick nav happen under the Selenium lock
+    with global_vars.DRIVER_LOCK:
+        # Check for logout
+        try:
+            # Look for login form field directly
+            login_field = global_vars.driver.find_elements(By.XPATH, "//form[@id='loginForm']//input[@id='email']")
+            if login_field:
+                print("Logged out. Attempting to log in.")
+                if check_for_logout_and_login():
+                    global_vars.initial_game_url = global_vars.driver.current_url
+                    return True
+        except Exception:
+            # fall back to URL check if DOM not ready
+            if "default.asp" in global_vars.driver.current_url.lower():
+                print("Likely logged out (default.asp detected). Attempting login.")
+                if check_for_logout_and_login():
+                    global_vars.initial_game_url = global_vars.driver.current_url
+                    return True
 
         # GBH page detection
-    if check_for_gbh(character_name):
-        return True
+        if check_for_gbh(character_name):
+            return True
 
-    # --- Script Check Detection ---
-    current_url = global_vars.driver.current_url.lower()
-    script_check_found = False
+        # --- Script Check Detection ---
+        current_url = global_vars.driver.current_url.lower()
+        script_check_found = False
 
-    # Fastest check: by URL
-    if "test.asp" in current_url or "activity" in current_url or "test" in current_url:
-        script_check_found = True
-    else:
-        # Fast DOM probe (no wait), safely handle stale elements
-        try:
-            elements = global_vars.driver.find_elements(By.XPATH, "//font")
-            for e in elements:
-                try:
-                    text = e.text.lower()
-                    if "first" in text and "characters" in text:
-                        script_check_found = True
-                        break
-                except StaleElementReferenceException:
-                    print("Stale element during fast script check DOM probe.")
-                except Exception as inner_e:
-                    print(f"Unexpected error while probing for script check: {inner_e}")
-        except Exception as e:
-            print(f"Error during fast script check DOM probe: {e}")
+        # Fastest check: by URL
+        if "test.asp" in current_url or "activity" in current_url or "test" in current_url:
+            script_check_found = True
+        else:
+            # Fast DOM probe (no wait), safely handle stale elements
+            try:
+                elements = global_vars.driver.find_elements(By.XPATH, "//font")
+                for e in elements:
+                    try:
+                        text = e.text.lower()
+                        if "first" in text and "characters" in text:
+                            script_check_found = True
+                            break
+                    except StaleElementReferenceException:
+                        print("Stale element during fast script check DOM probe.")
+                    except Exception as inner_e:
+                        print(f"Unexpected error while probing for script check: {inner_e}")
+            except Exception as e:
+                print(f"Error during fast script check DOM probe: {e}")
 
-    # If a script is check found — alert and terminate
-    if script_check_found:
-        discord_message_content = f"{character_name}@here ADMIN SCRIPT CHECK AARRHHH FUUCCCKK"
-        send_discord_notification(discord_message_content)
-        exit()
+        # If a script check is found — alert and terminate
+        if script_check_found:
+            discord_message_content = f"{character_name}@here ADMIN SCRIPT CHECK AARRHHH FUUCCCKK"
+            send_discord_notification(discord_message_content)
+            exit()
 
     return False  # No critical issues
+
 
 while True:
     if perform_critical_checks("UNKNOWN"):
@@ -421,14 +438,15 @@ while True:
     if is_player_in_jail():
         print("Player is in jail. Entering jail work loop...")
 
-        while is_player_in_jail():
-            # check for script checks and logouts in jail
-            if perform_critical_checks(character_name):
-                continue
-
-            global_vars.jail_timers = get_all_active_game_timers()
-            jail_work()
-            time.sleep(2)  # Tighter loop for responsiveness
+        while True:
+            with global_vars.DRIVER_LOCK:
+                if not is_player_in_jail():
+                    break
+                if perform_critical_checks(character_name):
+                    continue
+                global_vars.jail_timers = get_all_active_game_timers()
+                jail_work()
+            time.sleep(2)  # sleep outside the lock
 
         print("Player released from jail. Resuming normal script.")
         continue  # Skip the rest of the main loop for this cycle
@@ -493,379 +511,381 @@ while True:
     if perform_critical_checks(character_name):
         continue
 
-    # Auto Promo logic
-    if enabled_configs['do_auto_promo_enabled'] and promo_check_time_remaining <= 0:
-        print(f"Auto Promo timer ({promo_check_time_remaining:.2f}s) is ready. Attempting auto-promotion...")
-        if take_promotion():
-            action_performed_in_cycle = True
+    with global_vars.DRIVER_LOCK:
 
-    if perform_critical_checks(character_name):
-        continue
+        # Auto Promo logic
+        if enabled_configs['do_auto_promo_enabled'] and promo_check_time_remaining <= 0:
+            print(f"Auto Promo timer ({promo_check_time_remaining:.2f}s) is ready. Attempting auto-promotion...")
+            if take_promotion():
+                action_performed_in_cycle = True
 
-    # Diligent Worker Logic
-    if enabled_configs['do_diligent_worker_enabled'] and skill_time_remaining <= 0:
-        print(f"Skill timer ({skill_time_remaining:.2f}s) is ready. Attempting Diligent Worker.")
-        if diligent_worker(character_name, which_player=None):
-            action_performed_in_cycle = True
-        else:
-            print("Dilligent Worker logic did not perform an action or failed. Setting fallback cooldown.")
+        if perform_critical_checks(character_name):
+            continue
 
-    # Earn logic
-    if enabled_configs['do_earns_enabled'] and earn_time_remaining <= 0:
-        print(f"Earn timer ({earn_time_remaining:.2f}s) is ready. Attempting earn.")
-        if execute_earns_logic():
-            action_performed_in_cycle = True
-        else:
-            print("Earns logic did not perform an action or failed. Setting fallback cooldown.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Yellow pages scan logic
-    if yellow_pages_scan_time_remaining <= 0:
-        print(f"Yellow Pages Scan timer ({yellow_pages_scan_time_remaining:.2f}s) is ready. Attempting scan.")
-        if execute_yellow_pages_scan():
-            action_performed_in_cycle = True
-        else:
-            print("Yellow Pages Scan logic did not perform an action or failed. No immediate cooldown from here.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Funeral Parlour scan logic
-    if funeral_parlour_scan_time_remaining <= 0:
-        print(f"Funeral Parlour Scan timer ({funeral_parlour_scan_time_remaining:.2f}s) is ready. Attempting scan.")
-        if execute_funeral_parlour_scan():
-            action_performed_in_cycle = True
-        else:
-            print("Funeral Parlour Scan logic did not perform an action or failed. No immediate cooldown from here.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Mandatory Community Services (queued by AgCrime gate)
-    queued_cs = community_service_queue_count()
-    if queued_cs > 0 and action_time_remaining <= 0:
-        print(f"Mandatory Community Service queued ({queued_cs}). Attempting 1 now.")
-        if community_services(initial_player_data):
-            if dequeue_community_service():
-                print(f"Completed 1 queued Community Service. Remaining: {community_service_queue_count()}")
-            action_performed_in_cycle = True
-        else:
-            print("Queued Community Service attempt failed or could not start. Will retry next cycle.")
-
-    # Community Service Logic
-    if enabled_configs['do_community_services_enabled'] and action_time_remaining <= 0:
-        print(f"Community Service timer ({action_time_remaining:.2f}s) is ready. Attempting CS.")
-        if community_services(initial_player_data):
-            action_performed_in_cycle = True
-        else:
-            print("Community Service logic did not perform an action or failed. Setting fallback cooldown.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Firefighter duties Logic
-    if enabled_configs['do_firefighter_duties_enabled'] and action_time_remaining <= 0:
-        print(f"Firefighter duties timer ({action_time_remaining:.2f}s) is ready. Attempting to do duties   .")
-        if fire_duties():
-            action_performed_in_cycle = True
-        else:
-            print("Firefighter duties logic did not perform an action or failed. Setting fallback cooldown.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Study Degrees Logic
-    if enabled_configs['do_university_degrees_enabled'] and location == home_city and action_time_remaining <= 0:
-        print(f"Study Degree timer ({action_time_remaining:.2f}s) is ready. Attempting Study Degree.")
-        if study_degrees():
-            action_performed_in_cycle = True
-        else:
-            print("Study Degree logic did not perform an action or failed. Setting fallback cooldown.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Training logic
-    if enabled_configs.get('do_training_enabled') and action_time_remaining <= 0:
-        training_type = enabled_configs['do_training_enabled'].lower()
-
-        training_map = {
-            "police": police_training,
-            "forensics": train_forensics,
-            "fire": fire_training,
-            "customs": customs_training,
-            "jui jitsu": combat_training,
-            "muay thai": combat_training,
-            "karate": combat_training,
-            "mma": combat_training,
-        }
-
-        func = training_map.get(training_type)
-        if func:
-            func()
-            action_performed_in_cycle = True
-        else:
-            print(f"WARNING: Unknown training type '{training_type}' specified in settings.ini.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Drug manufacturing logic
-    if enabled_configs['do_manufacture_drugs_enabled'] and occupation == "Gangster":
-        if action_time_remaining <= 0:
-            print(f"Manufacture Drugs timer ({action_time_remaining:.2f}s) is ready. Attempting manufacture.")
-            if manufacture_drugs(initial_player_data):
+        # Diligent Worker Logic
+        if enabled_configs['do_diligent_worker_enabled'] and skill_time_remaining <= 0:
+            print(f"Skill timer ({skill_time_remaining:.2f}s) is ready. Attempting Diligent Worker.")
+            if diligent_worker(character_name, which_player=None):
                 action_performed_in_cycle = True
             else:
-                print("Manufacture Drugs logic did not perform an action or failed. Setting fallback cooldown.")
+                print("Dilligent Worker logic did not perform an action or failed. Setting fallback cooldown.")
 
-    if perform_critical_checks(character_name):
-        continue
+        # Earn logic
+        if enabled_configs['do_earns_enabled'] and earn_time_remaining <= 0:
+            print(f"Earn timer ({earn_time_remaining:.2f}s) is ready. Attempting earn.")
+            if execute_earns_logic():
+                action_performed_in_cycle = True
+            else:
+                print("Earns logic did not perform an action or failed. Setting fallback cooldown.")
 
-    # Do Aggravated Crime Logic
-    should_attempt_aggravated_crime = False
+        if perform_critical_checks(character_name):
+            continue
 
-    # Check if any aggravated crime setting is enabled
-    if any([
-        enabled_configs['do_hack_enabled'],
-        enabled_configs['do_pickpocket_enabled'],
-        enabled_configs['do_mugging_enabled'],
-        enabled_configs['do_armed_robbery_enabled'],
-        enabled_configs['do_torch_enabled'],
-    ]):
-        # Hack / Pickpocket / Mugging — only if no mandatory CS queued
+        # Yellow pages scan logic
+        if yellow_pages_scan_time_remaining <= 0:
+            print(f"Yellow Pages Scan timer ({yellow_pages_scan_time_remaining:.2f}s) is ready. Attempting scan.")
+            if execute_yellow_pages_scan():
+                action_performed_in_cycle = True
+            else:
+                print("Yellow Pages Scan logic did not perform an action or failed. No immediate cooldown from here.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Funeral Parlour scan logic
+        if funeral_parlour_scan_time_remaining <= 0:
+            print(f"Funeral Parlour Scan timer ({funeral_parlour_scan_time_remaining:.2f}s) is ready. Attempting scan.")
+            if execute_funeral_parlour_scan():
+                action_performed_in_cycle = True
+            else:
+                print("Funeral Parlour Scan logic did not perform an action or failed. No immediate cooldown from here.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Mandatory Community Services (queued by AgCrime gate)
+        queued_cs = community_service_queue_count()
+        if queued_cs > 0 and action_time_remaining <= 0:
+            print(f"Mandatory Community Service queued ({queued_cs}). Attempting 1 now.")
+            if community_services(initial_player_data):
+                if dequeue_community_service():
+                    print(f"Completed 1 queued Community Service. Remaining: {community_service_queue_count()}")
+                action_performed_in_cycle = True
+            else:
+                print("Queued Community Service attempt failed or could not start. Will retry next cycle.")
+
+        # Community Service Logic
+        if enabled_configs['do_community_services_enabled'] and action_time_remaining <= 0:
+            print(f"Community Service timer ({action_time_remaining:.2f}s) is ready. Attempting CS.")
+            if community_services(initial_player_data):
+                action_performed_in_cycle = True
+            else:
+                print("Community Service logic did not perform an action or failed. Setting fallback cooldown.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Firefighter duties Logic
+        if enabled_configs['do_firefighter_duties_enabled'] and action_time_remaining <= 0:
+            print(f"Firefighter duties timer ({action_time_remaining:.2f}s) is ready. Attempting to do duties   .")
+            if fire_duties():
+                action_performed_in_cycle = True
+            else:
+                print("Firefighter duties logic did not perform an action or failed. Setting fallback cooldown.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Study Degrees Logic
+        if enabled_configs['do_university_degrees_enabled'] and location == home_city and action_time_remaining <= 0:
+            print(f"Study Degree timer ({action_time_remaining:.2f}s) is ready. Attempting Study Degree.")
+            if study_degrees():
+                action_performed_in_cycle = True
+            else:
+                print("Study Degree logic did not perform an action or failed. Setting fallback cooldown.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Training logic
+        if enabled_configs.get('do_training_enabled') and action_time_remaining <= 0:
+            training_type = enabled_configs['do_training_enabled'].lower()
+
+            training_map = {
+                "police": police_training,
+                "forensics": train_forensics,
+                "fire": fire_training,
+                "customs": customs_training,
+                "jui jitsu": combat_training,
+                "muay thai": combat_training,
+                "karate": combat_training,
+                "mma": combat_training,
+            }
+
+            func = training_map.get(training_type)
+            if func:
+                func()
+                action_performed_in_cycle = True
+            else:
+                print(f"WARNING: Unknown training type '{training_type}' specified in settings.ini.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Drug manufacturing logic
+        if enabled_configs['do_manufacture_drugs_enabled'] and occupation == "Gangster":
+            if action_time_remaining <= 0:
+                print(f"Manufacture Drugs timer ({action_time_remaining:.2f}s) is ready. Attempting manufacture.")
+                if manufacture_drugs(initial_player_data):
+                    action_performed_in_cycle = True
+                else:
+                    print("Manufacture Drugs logic did not perform an action or failed. Setting fallback cooldown.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do Aggravated Crime Logic
+        should_attempt_aggravated_crime = False
+
+        # Check if any aggravated crime setting is enabled
         if any([
             enabled_configs['do_hack_enabled'],
             enabled_configs['do_pickpocket_enabled'],
             enabled_configs['do_mugging_enabled'],
-        ]) and aggravated_crime_time_remaining <= 0 and community_service_queue_count() == 0:
-            should_attempt_aggravated_crime = True
-            print(f"Aggravated Crime (Hack/Pickpocket/Mugging) timer ({aggravated_crime_time_remaining:.2f}s) is ready. Attempting crime.")
-
-        # Armed Robbery — only if no mandatory CS queued
-        if enabled_configs['do_armed_robbery_enabled']:
-            if (aggravated_crime_time_remaining <= 0
-                    and armed_robbery_recheck_time_remaining <= 0
-                    and community_service_queue_count() == 0):
+            enabled_configs['do_armed_robbery_enabled'],
+            enabled_configs['do_torch_enabled'],
+        ]):
+            # Hack / Pickpocket / Mugging — only if no mandatory CS queued
+            if any([
+                enabled_configs['do_hack_enabled'],
+                enabled_configs['do_pickpocket_enabled'],
+                enabled_configs['do_mugging_enabled'],
+            ]) and aggravated_crime_time_remaining <= 0 and community_service_queue_count() == 0:
                 should_attempt_aggravated_crime = True
-                print("Armed Robbery timers are ready. Attempting crime.")
+                print(f"Aggravated Crime (Hack/Pickpocket/Mugging) timer ({aggravated_crime_time_remaining:.2f}s) is ready. Attempting crime.")
 
-        # Torch — only if no mandatory CS queued
-        if enabled_configs['do_torch_enabled']:
-            if (aggravated_crime_time_remaining <= 0
-                    and torch_recheck_time_remaining <= 0
-                    and community_service_queue_count() == 0):
-                should_attempt_aggravated_crime = True
-                print("Torch timers are ready. Attempting crime.")
+            # Armed Robbery — only if no mandatory CS queued
+            if enabled_configs['do_armed_robbery_enabled']:
+                if (aggravated_crime_time_remaining <= 0
+                        and armed_robbery_recheck_time_remaining <= 0
+                        and community_service_queue_count() == 0):
+                    should_attempt_aggravated_crime = True
+                    print("Armed Robbery timers are ready. Attempting crime.")
 
-        # Execute if any path above marked it ready
-        if should_attempt_aggravated_crime:
-            if execute_aggravated_crime_logic(initial_player_data):
+            # Torch — only if no mandatory CS queued
+            if enabled_configs['do_torch_enabled']:
+                if (aggravated_crime_time_remaining <= 0
+                        and torch_recheck_time_remaining <= 0
+                        and community_service_queue_count() == 0):
+                    should_attempt_aggravated_crime = True
+                    print("Torch timers are ready. Attempting crime.")
+
+            # Execute if any path above marked it ready
+            if should_attempt_aggravated_crime:
+                if execute_aggravated_crime_logic(initial_player_data):
+                    action_performed_in_cycle = True
+                else:
+                    print("Aggravated Crime logic did not perform an action or failed. No immediate cooldown from here.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Deposit and withdraw excess money logic
+        if clean_money_on_hand_logic(initial_player_data):
+            action_performed_in_cycle = True
+        else:
+            print("Checking clean money on hand - Amount is within limits.")
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do event logic
+        if enabled_configs['do_event_enabled'] and event_time_remaining <= 0:
+            print(f"Event timer ({event_time_remaining:.2f}s) is ready. Attempting the event.")
+            if do_events():
                 action_performed_in_cycle = True
             else:
-                print("Aggravated Crime logic did not perform an action or failed. No immediate cooldown from here.")
+                print("Event logic did not perform an action or failed.")
 
-    if perform_critical_checks(character_name):
-        continue
+        if perform_critical_checks(character_name):
+            continue
 
-    # Deposit and withdraw excess money logic
-    if clean_money_on_hand_logic(initial_player_data):
-        action_performed_in_cycle = True
-    else:
-        print("Checking clean money on hand - Amount is within limits.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do event logic
-    if enabled_configs['do_event_enabled'] and event_time_remaining <= 0:
-        print(f"Event timer ({event_time_remaining:.2f}s) is ready. Attempting the event.")
-        if do_events():
-            action_performed_in_cycle = True
-        else:
-            print("Event logic did not perform an action or failed.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do Weapon Shop Logic
-    if enabled_configs['do_weapon_shop_check_enabled'] and check_weapon_shop_time_remaining <= 0:
-        print(f"Weapon Shop timer ({check_weapon_shop_time_remaining:.2f}s) is ready. Attempting check now.")
-        if check_weapon_shop(initial_player_data):
-            action_performed_in_cycle = True
-
-    # Do Consume Drugs Logic
-    if enabled_configs.get('do_consume_drugs_enabled') and consume_drugs_time_remaining <= 0:
-        print(f"Consume Drugs timer ({consume_drugs_time_remaining:.2f}s) is ready. Attempting consume/earn loop now.")
-        if consume_drugs():
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do Bionics Shop Logic
-    if enabled_configs['do_bionics_shop_check_enabled'] and check_bionics_store_time_remaining <= 0:
-        print(f"Bionics Shop timer ({check_bionics_store_time_remaining:.2f}s) is ready. Attempting check now.")
-        if check_bionics_shop(initial_player_data):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do Drug Store Check Logic
-    if enabled_configs['do_drug_store_enabled'] and check_drug_store_time_remaining <= 0:
-        print(f"Drug Store timer ({check_drug_store_time_remaining:.2f}s) is ready. Attempting to check Drug Store.")
-        if check_drug_store(initial_player_data):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do Gym Train Logic
-    if enabled_configs['do_gym_trains_enabled'] and gym_trains_time_remaining <= 0:
-        print(f"Gym trains timer ({gym_trains_time_remaining:.2f}s) is ready. Attempting Gym trains.")
-        if gym_training():
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Judge Casework Logic
-    if enabled_configs['do_judge_cases_enabled'] and case_time_remaining <= 0:
-        print(f"Judge Casework timer ({case_time_remaining:.2f}s) is ready. Attempting judge cases.")
-        if judge_casework(initial_player_data):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do Lawyer case work logic
-    if occupation == "Lawyer" and case_time_remaining <= 0:
-        print(f"Lawyer Casework timer ({case_time_remaining:.2f}s) is ready. Attempting lawyer cases.")
-        if lawyer_casework():
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Medical Casework Logic
-    if occupation in ("Nurse", "Doctor", "Surgeon", "Hospital Director") and case_time_remaining <= 0:
-        print(f"Medical Casework timer ({case_time_remaining:.2f}s) is ready. Attempting medical cases.")
-        if medical_casework(initial_player_data):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Police Casework Logic
-    if enabled_configs['do_police_cases_enabled'] and occupation in ["Police Officer"] and location == home_city and case_time_remaining <= 0:
-        print(f"Police case timer ({case_time_remaining:.2f}s) is ready. Attempting to do Police Cases")
-        if prepare_police_cases(character_name):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Post 911 Logic
-    if enabled_configs['do_post_911_enabled'] and occupation in ["Police Officer"] and location == home_city and post_911_time_remaining <= 0:
-        print(f"Post 911 timer ({post_911_time_remaining:.2f}s) is ready. Attempting to post 911")
-        if police_911():
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Firefighter Casework Logic
-    if occupation in ("Volunteer Fire Fighter", "Fire Fighter", "Fire Chief") and case_time_remaining <= 0:
-        print(f"Fire Fighter Casework timer ({case_time_remaining:.2f}s) is ready. Attempting Fire Fighter cases.")
-        if fire_casework(initial_player_data):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Bank Laundering Casework Logic
-    if occupation in ("Bank Teller", "Loan Officer", "Bank Manager") and case_time_remaining <= 0:
-        if location == home_city:
-            print(f"Bank Casework timer ({case_time_remaining:.2f}s) is ready. Attempting bank cases.")
-            if banker_laundering():
-                action_performed_in_cycle = True
-        else:
-            print(f"Skipping Bank Casework: Not in home city. Location: {location}, Home City: {home_city}.")
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Customs Blind Eye Logic
-    queue_count = blind_eye_queue_count()
-    if ('customs' in (occupation or '').lower()) and location == home_city and queue_count > 0:
-        if trafficking_time_remaining <= 0:
-            print(f"Blind Eye queued ({queue_count}) and Trafficking timer ({trafficking_time_remaining:.2f}s) is ready. Attempting Blind Eye.")
-            if customs_blind_eyes():
-                action_performed_in_cycle = True
-        else:
-            print(f"Blind Eye queued ({queue_count}), but Trafficking timer not ready ({trafficking_time_remaining:.2f}s).")
-
-    # Bank Add Clients Logic
-    if enabled_configs['do_bank_add_clients_enabled']:
-        if bank_add_clients_time_remaining <= 0:
-            print(f"Add Clients timer ({bank_add_clients_time_remaining:.2f}s) is ready. Attempting to add new clients.")
-            if banker_add_clients(initial_player_data):
+        # Do Weapon Shop Logic
+        if enabled_configs['do_weapon_shop_check_enabled'] and check_weapon_shop_time_remaining <= 0:
+            print(f"Weapon Shop timer ({check_weapon_shop_time_remaining:.2f}s) is ready. Attempting check now.")
+            if check_weapon_shop(initial_player_data):
                 action_performed_in_cycle = True
 
-    if perform_critical_checks(character_name):
-        continue
-
-    # Engineering Casework Logic
-    if occupation in ("Mechanic", "Technician", "Engineer", "Chief Engineer") and case_time_remaining <= 0:
-        print(f"Engineering Casework timer ({case_time_remaining:.2f}s) is ready. Attempting engineering cases.")
-        if engineering_casework(initial_player_data):
-            action_performed_in_cycle = True
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Check messages logic
-    current_unread_messages = get_unread_message_count()
-
-    if current_unread_messages > 0:
-        read_and_send_new_messages()
-        global_vars._last_unread_message_count = get_unread_message_count()
-        action_performed_in_cycle = True
-
-    elif global_vars._last_unread_message_count > 0:
-        global_vars._last_unread_message_count = 0
-
-    # Check Journals logic
-    current_unread_journals = get_unread_journal_count()
-
-    if current_unread_journals > 0:
-        if process_unread_journal_entries(initial_player_data):
-            action_performed_in_cycle = True
-        global_vars._last_unread_journal_count = get_unread_journal_count()
-
-    elif global_vars._last_unread_journal_count > 0:
-        global_vars._last_unread_journal_count = 0
-
-    if perform_critical_checks(character_name):
-        continue
-
-    # Do Laundering logic (as a gangster, not a banker)
-    if enabled_configs['do_launders_enabled']:
-        if location == home_city:
-            print(f"Skipping Launder: In home city ({location}).")
-            global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(100, 200))
-        elif launder_time_remaining <= 0:
-            print(f"Launder timer ({launder_time_remaining:.2f}s) is ready. Attempting launder.")
-            if laundering(initial_player_data):
+        # Do Consume Drugs Logic
+        if enabled_configs.get('do_consume_drugs_enabled') and consume_drugs_time_remaining <= 0:
+            print(f"Consume Drugs timer ({consume_drugs_time_remaining:.2f}s) is ready. Attempting consume/earn loop now.")
+            if consume_drugs():
                 action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do Bionics Shop Logic
+        if enabled_configs['do_bionics_shop_check_enabled'] and check_bionics_store_time_remaining <= 0:
+            print(f"Bionics Shop timer ({check_bionics_store_time_remaining:.2f}s) is ready. Attempting check now.")
+            if check_bionics_shop(initial_player_data):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do Drug Store Check Logic
+        if enabled_configs['do_drug_store_enabled'] and check_drug_store_time_remaining <= 0:
+            print(f"Drug Store timer ({check_drug_store_time_remaining:.2f}s) is ready. Attempting to check Drug Store.")
+            if check_drug_store(initial_player_data):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do Gym Train Logic
+        if enabled_configs['do_gym_trains_enabled'] and gym_trains_time_remaining <= 0:
+            print(f"Gym trains timer ({gym_trains_time_remaining:.2f}s) is ready. Attempting Gym trains.")
+            if gym_training():
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Judge Casework Logic
+        if enabled_configs['do_judge_cases_enabled'] and case_time_remaining <= 0:
+            print(f"Judge Casework timer ({case_time_remaining:.2f}s) is ready. Attempting judge cases.")
+            if judge_casework(initial_player_data):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do Lawyer case work logic
+        if occupation == "Lawyer" and case_time_remaining <= 0:
+            print(f"Lawyer Casework timer ({case_time_remaining:.2f}s) is ready. Attempting lawyer cases.")
+            if lawyer_casework():
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Medical Casework Logic
+        if occupation in ("Nurse", "Doctor", "Surgeon", "Hospital Director") and case_time_remaining <= 0:
+            print(f"Medical Casework timer ({case_time_remaining:.2f}s) is ready. Attempting medical cases.")
+            if medical_casework(initial_player_data):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Police Casework Logic
+        if enabled_configs['do_police_cases_enabled'] and occupation in ["Police Officer"] and location == home_city and case_time_remaining <= 0:
+            print(f"Police case timer ({case_time_remaining:.2f}s) is ready. Attempting to do Police Cases")
+            if prepare_police_cases(character_name):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Post 911 Logic
+        if enabled_configs['do_post_911_enabled'] and occupation in ["Police Officer"] and location == home_city and post_911_time_remaining <= 0:
+            print(f"Post 911 timer ({post_911_time_remaining:.2f}s) is ready. Attempting to post 911")
+            if police_911():
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Firefighter Casework Logic
+        if occupation in ("Volunteer Fire Fighter", "Fire Fighter", "Fire Chief") and case_time_remaining <= 0:
+            print(f"Fire Fighter Casework timer ({case_time_remaining:.2f}s) is ready. Attempting Fire Fighter cases.")
+            if fire_casework(initial_player_data):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Bank Laundering Casework Logic
+        if occupation in ("Bank Teller", "Loan Officer", "Bank Manager") and case_time_remaining <= 0:
+            if location == home_city:
+                print(f"Bank Casework timer ({case_time_remaining:.2f}s) is ready. Attempting bank cases.")
+                if banker_laundering():
+                    action_performed_in_cycle = True
             else:
-                print("Launder logic did not perform an action or failed. Setting fallback cooldown.")
+                print(f"Skipping Bank Casework: Not in home city. Location: {location}, Home City: {home_city}.")
 
-    if perform_critical_checks(character_name):
-        continue
+        if perform_critical_checks(character_name):
+            continue
+
+        # Customs Blind Eye Logic
+        queue_count = blind_eye_queue_count()
+        if ('customs' in (occupation or '').lower()) and location == home_city and queue_count > 0:
+            if trafficking_time_remaining <= 0:
+                print(f"Blind Eye queued ({queue_count}) and Trafficking timer ({trafficking_time_remaining:.2f}s) is ready. Attempting Blind Eye.")
+                if customs_blind_eyes():
+                    action_performed_in_cycle = True
+            else:
+                print(f"Blind Eye queued ({queue_count}), but Trafficking timer not ready ({trafficking_time_remaining:.2f}s).")
+
+        # Bank Add Clients Logic
+        if enabled_configs['do_bank_add_clients_enabled']:
+            if bank_add_clients_time_remaining <= 0:
+                print(f"Add Clients timer ({bank_add_clients_time_remaining:.2f}s) is ready. Attempting to add new clients.")
+                if banker_add_clients(initial_player_data):
+                    action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Engineering Casework Logic
+        if occupation in ("Mechanic", "Technician", "Engineer", "Chief Engineer") and case_time_remaining <= 0:
+            print(f"Engineering Casework timer ({case_time_remaining:.2f}s) is ready. Attempting engineering cases.")
+            if engineering_casework(initial_player_data):
+                action_performed_in_cycle = True
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Check messages logic
+        current_unread_messages = get_unread_message_count()
+
+        if current_unread_messages > 0:
+            read_and_send_new_messages()
+            global_vars._last_unread_message_count = get_unread_message_count()
+            action_performed_in_cycle = True
+
+        elif global_vars._last_unread_message_count > 0:
+            global_vars._last_unread_message_count = 0
+
+        # Check Journals logic
+        current_unread_journals = get_unread_journal_count()
+
+        if current_unread_journals > 0:
+            if process_unread_journal_entries(initial_player_data):
+                action_performed_in_cycle = True
+            global_vars._last_unread_journal_count = get_unread_journal_count()
+
+        elif global_vars._last_unread_journal_count > 0:
+            global_vars._last_unread_journal_count = 0
+
+        if perform_critical_checks(character_name):
+            continue
+
+        # Do Laundering logic (as a gangster, not a banker)
+        if enabled_configs['do_launders_enabled']:
+            if location == home_city:
+                print(f"Skipping Launder: In home city ({location}).")
+                global_vars._script_launder_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(100, 200))
+            elif launder_time_remaining <= 0:
+                print(f"Launder timer ({launder_time_remaining:.2f}s) is ready. Attempting launder.")
+                if laundering(initial_player_data):
+                    action_performed_in_cycle = True
+                else:
+                    print("Launder logic did not perform an action or failed. Setting fallback cooldown.")
+
+        if perform_critical_checks(character_name):
+            continue
 
     # --- Re-fetch all game timers just before determining sleep duration ---
     all_timers = get_all_active_game_timers()
@@ -874,18 +894,20 @@ while True:
     resting_page_url = global_vars.config.get('Auth', 'RestingPage', fallback='').strip()
 
     if resting_page_url:
-        if resting_page_url not in global_vars.driver.current_url:
-            print(f"Current URL is '{global_vars.driver.current_url}', expected to include '{resting_page_url}'. Navigating back...")
-            try:
-                global_vars.driver.get(resting_page_url)
-                time.sleep(global_vars.ACTION_PAUSE_SECONDS)
-            except Exception as e:
-                print(f"FAILED: Could not navigate to the resting page URL '{resting_page_url}'. Error: {e}")
-                continue  # Restart loop to try again
-
+        with global_vars.DRIVER_LOCK:
             if resting_page_url not in global_vars.driver.current_url:
-                print(f"Still not back on resting page. Current URL: {global_vars.driver.current_url}")
-                continue  # Restart loop to reset state
+                print(
+                    f"Current URL is '{global_vars.driver.current_url}', expected to include '{resting_page_url}'. Navigating back...")
+                try:
+                    global_vars.driver.get(resting_page_url)
+                    time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+                except Exception as e:
+                    print(f"FAILED: Could not navigate to the resting page URL '{resting_page_url}'. Error: {e}")
+                    continue
+
+                if resting_page_url not in global_vars.driver.current_url:
+                    print(f"Still not back on resting page. Current URL: {global_vars.driver.current_url}")
+                    continue
     else:
         print("WARNING: No 'RestingPage' URL set in settings.ini under [Auth].")
 

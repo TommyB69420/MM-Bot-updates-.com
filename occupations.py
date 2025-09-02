@@ -5,13 +5,12 @@ import time
 from selenium.common import NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
-
 import global_vars
+from comms_journals import send_discord_notification
 from database_functions import _read_json_file, remove_player_cooldown, set_player_data
 from helper_functions import _find_and_send_keys, _find_and_click, _find_element, _navigate_to_page_via_menu, \
     _get_element_text, _get_element_attribute, _find_elements, _get_current_url, blind_eye_queue_count, \
     _get_dropdown_options, _select_dropdown_option, dequeue_blind_eye, _find_elements_quiet
-from timer_functions import get_game_timer_remaining, get_all_active_game_timers
 
 
 def community_services(player_data):
@@ -1049,8 +1048,7 @@ def customs_blind_eyes():
 
     if not valid:
         print(f"No valid Blind Eye targets available. Raw options: {options}")
-        global_vars._script_trafficking_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(
-            seconds=random.uniform(60, 120))
+        global_vars._script_trafficking_cooldown_end_time = datetime.datetime.now() + datetime.timedelta(seconds=random.uniform(60, 120))
         return False
 
     print(f"Valid Blind Eye targets found: {valid}")
@@ -1073,8 +1071,106 @@ def customs_blind_eyes():
     # if blind eye is success, consume 1 success token from the JSON file.
     if dequeue_blind_eye():
         remaining = blind_eye_queue_count()
+        send_discord_notification(f"Turned a Blind Eye for '{choice}'. Remaining queued: {remaining}")
         print(f"Turned a Blind Eye for '{choice}'. Remaining queued: {remaining}")
     else:
         print("WARNING: Action done but queue could not be decremented (file read/write issue?)")
 
     return True
+
+def execute_smuggle_for_player(target_player: str) -> bool:
+    try:
+        target_player = (target_player or "").strip()
+        if not target_player:
+            print("Smuggle not found for that player")
+            return False
+
+        # Open Aggravated Crimes page
+        if not _navigate_to_page_via_menu(
+                "//span[@class='income']",
+                "//a[normalize-space()='Aggravated Crimes']",
+                "Aggravated Crimes"
+        ):
+            print("FAILED: Could not open Aggravated Crimes.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+        # 2) Select radio id=smugglefuneral
+        if not _find_and_click(By.XPATH, "//*[@id='smugglefuneral']"):
+            print("FAILED: Could not select 'smugglefuneral' option.")
+            return False
+
+        # 3) Click Commit Crime
+        if not _find_and_click(By.XPATH, "//input[@name='B1']"):
+            print("FAILED: Could not click 'Commit Crime'.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+        # Trafficking timer check (abort if the warning appears)
+        page_source = global_vars.driver.page_source or ""
+        if "You cannot commit an aggravated crime at this point in time! Make sure your Trafficking timer is ready" in page_source:
+            print("Traffick timer not ready try again later")
+            return False
+
+        # On smuggle funeral page: select player from dropdown, click Continue
+        dropdown_xpath = "//*[@id='AutoNumber4']/tbody/tr[5]/td[2]/p/select"
+        dropdown_el = _find_element(By.XPATH, dropdown_xpath, timeout=2)
+        if not dropdown_el:
+            print("Smuggle not found for that player")
+            return False
+
+        # Try direct select by visible text
+        selected_ok = _select_dropdown_option(By.XPATH, dropdown_xpath, target_player)
+        if not selected_ok:
+            # Fallback: case-insensitive match over options
+            try:
+                options = dropdown_el.find_elements(By.TAG_NAME, "option")
+                norm_target = target_player.strip().lower()
+                matched_val = None
+                for opt in options:
+                    if (opt.text or "").strip().lower() == norm_target:
+                        matched_val = opt.get_attribute("value")
+                        break
+                if matched_val:
+                    # select by value with small JS
+                    global_vars.driver.execute_script("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change'));", dropdown_el, matched_val)
+                    selected_ok = True
+            except Exception:
+                selected_ok = False
+
+        if not selected_ok:
+            print("Smuggle not found for that player")
+            return False
+
+        # Click Continue
+        if not _find_and_click(By.XPATH, "//*[@id='AutoNumber4']/tbody/tr[7]/td[2]/p/input"):
+            print("FAILED: Could not click Continue after selecting player.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS)
+
+        # Next page: select radio with value='smuggle' (label contains 'Smuggle the drugs into'). Prefer value match; a label text can vary slightly
+        if not _find_and_click(By.XPATH, "//input[@type='radio' and @value='smuggle']"):
+            # Secondary: try to find by nearby text
+            radio_by_text = _find_element(By.XPATH, "//*[contains(normalize-space(.), 'Smuggle the drugs into')]/preceding::input[@type='radio'][1]", timeout=2)
+            if radio_by_text:
+                radio_by_text.click()
+                time.sleep(global_vars.ACTION_PAUSE_SECONDS / 2)
+            else:
+                print("FAILED: Could not select 'Smuggle the drugs into' option.")
+                return False
+
+        # Submit
+        if not _find_and_click(By.XPATH, "//*[@id='AutoNumber4']/tbody/tr[8]/td[2]/p/input"):
+            print("FAILED: Could not click Submit on final step.")
+            return False
+
+        time.sleep(global_vars.ACTION_PAUSE_SECONDS / 2)
+        print(f"Smuggle flow completed for '{target_player}'.")
+        return True
+
+    except Exception as e:
+        print(f"ERROR during smuggle flow: {e}")
+        return False

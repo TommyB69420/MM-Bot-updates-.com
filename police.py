@@ -706,6 +706,14 @@ def solve_case(character_name):
         _return_case()
         return False
 
+    # If fingerprints list multiple suspects (comma-separated), bury the case.
+    fp_txt = (cues.get("fingerprint") or "").strip()
+    if fp_txt and "," in fp_txt:
+        print(f"Fingerprint returned multiple suspects ({fp_txt}) — BURY.")
+        _bury_case()
+        return True
+
+
     suspect = cues.get("suspect")
 
     # If still no suspect, and there are no leads at all, bury instead of return
@@ -985,7 +993,7 @@ def _parse_case_for_signals():
             data["dna"] = md.group(1).strip()
             data["suspect"] = data["dna"]
 
-    # Fingerprints (owner could be …) → treat as usable suspect
+    # Fingerprints (owner could be …)
     if "Fingerprint Evidence:" in raw:
         mf = re.search(r'owner could be,\s*([^.<]+)\.', raw, re.IGNORECASE)
         if mf:
@@ -993,8 +1001,10 @@ def _parse_case_for_signals():
             # clean any trailing punctuation/quotes
             name = re.sub(r'^[\'"]|[\'"]$', '', name).strip()
             data["fingerprint"] = name
-            # Promote to suspect even without "match=" phrasing
-            data["suspect"] = name
+            # Only promote to suspect if it's clearly a single name (no commas)
+            # and only if we don't already have a harder suspect (e.g., DNA).
+            if "," not in name and not data.get("suspect"):
+                data["suspect"] = name
 
     # Forensics
     if "Forensic Log" in raw:

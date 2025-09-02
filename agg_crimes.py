@@ -71,8 +71,7 @@ def execute_yellow_pages_scan():
     if not _navigate_to_page_via_menu(
             "//*[@id='nav_left']/div[3]/a[2]",
             "//*[@id='city_holder']//a[contains(@class, 'business') and contains(@class, 'yellow_pages')]",
-            "Yellow Pages"
-    ):
+            "Yellow Pages"):
         print("FAILED: Navigation to Yellow Pages failed. Skipping scan.")
         return False
 
@@ -94,8 +93,7 @@ def execute_yellow_pages_scan():
                 if not _navigate_to_page_via_menu(
                         "//*[@id='nav_left']/div[3]/a[2]",
                         "//*[@id='city_holder']//a[contains(@class, 'business') and contains(@class, 'yellow_pages')]",
-                        "Yellow Pages"
-                ):
+                        "Yellow Pages"):
                     print(f"CRITICAL FAILED: Failed to re-navigate for {occupation}. Stopping scan.")
                     continue
 
@@ -135,8 +133,7 @@ def execute_yellow_pages_scan():
             if not _navigate_to_page_via_menu(
                     "//*[@id='nav_left']/div[3]/a[2]",
                     "//*[@id='city_holder']//a[contains(@class, 'business') and contains(@class, 'yellow_pages')]",
-                    "Yellow Pages"
-            ):
+                    "Yellow Pages"):
                 print(f"CRITICAL FAILED: Failed to recover navigation for {occupation}. Stopping scan.")
                 return False
 
@@ -166,8 +163,7 @@ def _open_aggravated_crime_page(crime_type):
         if not _navigate_to_page_via_menu(
             "//span[@class='income']",
             "//a[@href='/income/agcrime.asp'][normalize-space()='Aggravated Crimes']",
-            "Aggravated Crime Page"
-    ):
+            "Aggravated Crime Page"):
             return False
 
         # check the page-level fail box before touching any radio <<<
@@ -188,7 +184,6 @@ def _open_aggravated_crime_page(crime_type):
         "Mugging": "//input[@id='mugging']",
         "Torch": "//input[@type='radio' and @value='torchbusiness' and @name='agcrime']",
         "Armed Robbery": "//input[@type='radio' and @value='armed' and @name='agcrime']"
-
     }
 
     if not _find_and_click(By.XPATH, radio_button_xpath[crime_type]):
@@ -207,8 +202,7 @@ def _repay_player(player_name, amount):
     if not _navigate_to_page_via_menu(
             "//span[@class='income']",
             "//td[@class='toolitem']//a[normalize-space()='Bank']",
-            "Bank Page"
-    ):
+            "Bank Page"):
         log_aggravated_event("Repay", player_name, "Failed (Navigate Bank)", amount)
         return False
 

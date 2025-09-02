@@ -131,6 +131,9 @@ initial_game_url = None
 # Global Variable to store if the script needs to reselect an earn after taking a promotion.
 force_reselect_earn = False
 
+# Global Variable that tells Main.py to pause while Discord uses Selenium
+DRIVER_LOCK = threading.RLock()
+
 # Global variables to store hacked player and amount for repayment
 hacked_player_for_repay = None
 hacked_amount_for_repay = None
